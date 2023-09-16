@@ -8,6 +8,7 @@ converter = opencc.OpenCC("t2s.json")
 placeholder_map = {}
 current_placeholder = 0
 
+
 def replace_japanese(match):
     global current_placeholder
     placeholder = f"__PLACEHOLDER_{current_placeholder}__"
@@ -15,12 +16,11 @@ def replace_japanese(match):
     current_placeholder += 1
     return placeholder
 
+
 def replace_back(match):
     return placeholder_map.get(match.group(0), match.group(0))
 
-# 读取输入文件并进行处理
-#with open("zhwiki-vn.xml", "r", encoding="utf-8") as input_file:
-#    content = input_file.read()
+
 def convert(content):
     # 替换日文内容为占位符
     pattern = re.compile(r"\{\{[Ll]ang-[a-z-]+\|([^}{|]+)\|([^}{|]+)\}\}|\{\{[Ll]ang-[a-z-]+\|([^}{]+)\}\}|\{\{[Ll]ang\|[a-z-]+\|((?:[^}{]|\n)+)\}\}|\{\{[Ll]j\|((?:[^}{]|\n)+)\}\}", re.MULTILINE)

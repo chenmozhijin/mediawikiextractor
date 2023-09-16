@@ -1,12 +1,10 @@
 import regex as re
 import json
 import argparse
-import time
 import requests
-import os
 import sys
-import difflib
 from convert_wiki_text import convert
+
 
 def devide_list(input_list, chunk_size):
     """
@@ -24,6 +22,7 @@ def devide_list(input_list, chunk_size):
 
     return [input_list[i:i + chunk_size] for i in range(0, len(input_list), chunk_size)]
 
+
 def get_config():
     try:
         with open(config_path, 'r', encoding='UTF-8') as file:
@@ -37,13 +36,14 @@ def get_config():
     except json.JSONDecodeError:
         print(f"配置文件 '{config_path}' 解析失败")
         sys.exit(1)
-    except:
+    except BaseException:
         print(f"读取配置文件 '{config_path}' 时出现未知错误")
         sys.exit(1)
 
-    return pageid_list,api_url,source
+    return pageid_list, api_url, source
 
-def get_page(pageid_list,api_url,source):
+
+def get_page(pageid_list, api_url, source):
     params = {'action': 'query', 'format': 'json', 'prop': 'cirrusdoc', 'curtimestamp': 1, 'indexpageids': 1}
     data = []
     for pageidlist_devide in devide_list(pageid_list, 50):
@@ -55,7 +55,7 @@ def get_page(pageid_list,api_url,source):
                 # 发送GET请求获取页面内容
                 requests_return = requests.get(api_url, params=params, timeout=(10, 30))
                 request_times = request_times + 1
-            except:
+            except BaseException:
                 print(f"[error]请求获取页面内容失败，正在重试。请求的api:{api_url}，请求的参数{params}")
                 continue
             else:
@@ -67,12 +67,13 @@ def get_page(pageid_list,api_url,source):
                     else:
                         print("[error]响应不完整，可能因请求页面数据量过大而导致。请尝试调整请求的数据量。")
         for pageid in pageidlist_devide:
-            p_cirrusdoc,title,version,timestamp,cirrusdoc = process_cirrusdoc(pageid,requests_return)
-            data.extend([{"title": title, "pageid": pageid, "version": version, "timestamp": timestamp, "source": source, "text": p_cirrusdoc , "cirrusdoc": cirrusdoc}])
+            p_cirrusdoc, title, version, timestamp, cirrusdoc = process_cirrusdoc(pageid, requests_return)
+            data.extend([{"title": title, "pageid": pageid, "version": version, "timestamp": timestamp, "source": source, "text": p_cirrusdoc, "cirrusdoc": cirrusdoc}])
             with open(output_path, 'w', encoding='UTF-8') as output_file:
-                            json.dump(data, output_file, ensure_ascii=False, indent=4)
+                json.dump(data, output_file, ensure_ascii=False, indent=4)
 
-def process_cirrusdoc(pageid,requests_return):
+
+def process_cirrusdoc(pageid, requests_return):
     # 获取页面json
     rawpagejson = requests_return['query']['pages'][str(pageid)]
     # 获取页面标题
@@ -95,8 +96,8 @@ def process_cirrusdoc(pageid,requests_return):
     # 将页面中的标题转换为正则表达式
     headings_pattern = '|'.join(re.escape(heading) for heading in headings)
     headings_pattern1 = f"\n*=+(?: )*(?:{headings_pattern})(?: )*=+\n*"
-    matching_headings1 = re.findall(headings_pattern1, source_text_p)#获取所有带=的标题
-    matching_headings2 = findall('[^\n}}{{><=]*', headings_pattern1, '(?!=+)[^\n}}{{><]*', source_text_p)#获取所有带=的标题与上下文
+    matching_headings1 = re.findall(headings_pattern1, source_text_p)  # 获取所有带=的标题
+    matching_headings2 = findall('[^\n}}{{><=]*', headings_pattern1, '(?!=+)[^\n}}{{><]*', source_text_p)  # 获取所有带=的标题与上下文
 
     # 恢复原标题
     cirrusdoc2 = cirrusdoc
@@ -105,34 +106,35 @@ def process_cirrusdoc(pageid,requests_return):
         n = 0
         while n < len(matching_headings1):
             # 替换带=的标题为正则表达式
-            pattern = re.escape(re.sub(headings_pattern1, rf'_space_placeholder___', escape_s(matching_headings2[n])))
-            pattern = re.sub(r"_space_placeholder___", rf'(?: +|(?P<equal_sign>=+))',pattern)
+            pattern = re.escape(re.sub(headings_pattern1, r'_space_placeholder___', escape_s(matching_headings2[n])))
+            pattern = re.sub(r"_space_placeholder___", r'(?: +|(?P<equal_sign>=+))', pattern)
             # 判断带=的标题与上下文是否有上下文
             if pattern == "(?: +|(?P<equal_sign>=+))":
                 print(f"页面\"{title}\"中的标题：{repr(matching_headings2[n])}无法匹配")
             else:
                 # 替换带=的标题为正则表达式
                 cirrusdoc2 = re.sub(pattern, rf'\g<equal_sign>{matching_headings2[n]}', cirrusdoc2)
-            
+
             n = n + 1
 
     # 恢复原换行符
     print('恢复原换行符', end="\r")
     cirrusdoc3 = cirrusdoc2
-    matching_newline = findall('[^\n}}{{><]+', '\n+', '[^\n}}{{><]+', source_text_p)#获取所有'\n'的上下文
+    matching_newline = findall('[^\n}}{{><]+', '\n+', '[^\n}}{{><]+', source_text_p)  # 获取所有'\n'的上下文
     n = 0
     while n < len(matching_newline):
-        pattern = re.sub(r"\n+", rf'( +)', escape(matching_newline[n]))
+        pattern = re.sub(r"\n+", r'( +)', escape(matching_newline[n]))
         if pattern != "( +)":
             cirrusdoc3 = re.sub(pattern, rf'{matching_newline[n]}', cirrusdoc3)
         n = n + 1
 
     # 清理cirrusdoc3
     print('开始清理', end="\r")
-    cirrusdoc4 = clear_text(cirrusdoc3,source_text, source_text_p)
-    return cirrusdoc4,title,version,timestamp,cirrusdoc
+    cirrusdoc4 = clear_text(cirrusdoc3, source_text, source_text_p)
+    return cirrusdoc4, title, version, timestamp, cirrusdoc
 
-def clear_text(cirrusdoc,source_text,source_text_p):
+
+def clear_text(cirrusdoc, source_text, source_text_p):
     """
     清理cirrusdoc
 
@@ -146,8 +148,7 @@ def clear_text(cirrusdoc,source_text,source_text_p):
     # 1.清理图片
 
     c_source_text = re.sub(r"<big>|</big>|<small>|</small>|'''''|'''|''|<br />|<br/>|<br[^>]*>|<del[^>]*>|</del>|<s[^>]*>|</s>|<span[^>]*>|</span>|<ins[^>]*>|</ins>|<u[^>]*>|</u>|<poem[^>]*>|</poem>|<div[^>]*>|</div>", "", source_text)
-    
-    c1_source_text = re.sub(r'\{\{[Ll]ang\|[jekfr][ranou]\|((?:[^}{]|\n)+)\}\}', r'\1', c_source_text)#匹配[Ll]ang|[jekfr][ranou]|
+    c1_source_text = re.sub(r'\{\{[Ll]ang\|[jekfr][ranou]\|((?:[^}{]|\n)+)\}\}', r'\1', c_source_text)  # 匹配[Ll]ang|[jekfr][ranou]|
     c2_source_text = re.sub(r'\[\[([^\]]*)\]\]', r'\1', c1_source_text)
     c3_source_text = re.sub(r'\[https?://[^}{\]\[ ]+ ([^\]\[]+)\]', r'\1', c1_source_text)
     print('清理图片', end="\r")
@@ -177,8 +178,7 @@ def clear_text(cirrusdoc,source_text,source_text_p):
     return cirrusdoc
 
 
-
-def findall(pattern1, pattern2, pattern3,text):
+def findall(pattern1, pattern2, pattern3, text):
     """
     匹配所有pattern1+pattern2+pattern3
 
@@ -212,46 +212,48 @@ def findall(pattern1, pattern2, pattern3,text):
             matchs.append(match2[nn])
             # 将nn加1
             nn = nn + 1
-        
+
         # 将n加1
         n = n + 1
-    
+
     # 返回matchs列表
     return matchs
-    
+
+
 def preprocess_source_text(source_text):
-    #简繁转换
+    # 简繁转换
     source_text = convert(source_text)
-    #转换部分基本模板
-    source_text = re.sub(r"\{\{(?:Zh|Zh-hans|Zh-hant|Ja icon|Ja|En|Ko|Ru|Fr|De)\}\}|\{\{Languageicon[^}{]*\}\}|\{\{clear\}\}|\{\{剧透\}\}|\{\{剧透提醒\}\}|<big>|</big>|<small>|</small>|'''''|'''|''|<br />|<br/>|<br[^>]*>|<del[^>]*>|</del>|<s[^>]*>|</s>|<span[^>]*>|</span>|<ins[^>]*>|</ins>|<u[^>]*>|</u>|<poem[^>]*>|</poem>|<div[^>]*>|</div>|\[\[File:[^\]\[]*\]\]|\[\[文件:[^\]\[]*\]\]|\[\[[Ii]mage:[^\]\[]*\]\]|\{\{#tag:div\|<img[^}{]*\}\}|\{\{#ifexpr.*\n.*\n.*\}\}\}\}", r'', source_text)#匹配并删除#|<code>|</code>|<nowiki>|</nowiki>|<pre>|</pre>
-    source_text = re.sub(r'\[\[(?!File:)(?!文件:)(?![Ii]mage:)(?!#)[^[}{\]|]*\|(?!\*)([^}{[\]]*)\]\]', r'\1', source_text)#匹配[[实际页面|显示文字]]]
-    source_text = re.sub(r'\{\{[Rr]uby\|([^|}{]+)\|([^|}{]+)[|jaenzh]*\}\}', r'\1', source_text) #匹配[Rr]uby
-    source_text = re.sub(r'\[\[(?!File:)(?!文件:)(?![Ii]mage:)(?!#)[^[}{\]|]*\|(?!\*)([^}{[\]]*)\]\]', r'\1', source_text)#匹配[[实际页面|显示文字]]] for {{lang|ja|「[[致永远之星|{{ruby|永遠|とわ}}の星へ]]」}}
-    source_text = re.sub(r'\{\{[Ff]ont[^}{]*\|((?:[^}{]|\n)+)\}\}', r'\1', source_text)#匹配[Ff]ont
-    source_text = re.sub(r'\{\{[Ll]j\|((?:[^}{]|\n)+)\}\}', r'\1', source_text)#匹配[Ll]j
-    source_text = re.sub(r'\{\{[Cc]olor\|[^|}{]+\|((?:[^}{]+)|\n)\}\}', r'\1', source_text)#匹配color
-    source_text = re.sub(r'\{\{coloredlink\|[^|}{]+\|([^}{]+)\}\}', r'\1', source_text)#匹配coloredlink
-    source_text = re.sub(r'\{\{[Ll]ang-ja\|([^}{|]+)\|([^}{|]+)\}\}', r'日语：\1', source_text)#{{lang-ja|'''まどひ白きの神隠し'''|ja}}
-    source_text = re.sub(r'\{\{[Ll]ang-de\|([^}{]+)\}\}', r'德语：\1', source_text)#匹配
-    source_text = re.sub(r'\{\{[Ll]ang-en\|([^}{]+)\}\}', r'英语：\1', source_text)#匹配
-    source_text = re.sub(r'\{\{[Ll]ang-fr\|([^}{]+)\}\}', r'法语：\1', source_text)#匹配
-    source_text = re.sub(r'\{\{[Ll]ang-ja\|([^}{]+)\}\}', r'日语：\1', source_text)#匹配
-    source_text = re.sub(r'\{\{[Ll]ang-ko\|([^}{]+)\}\}', r'韩语：\1', source_text)#匹配
-    source_text = re.sub(r'\{\{[Ll]ang-ru\|([^}{]+)\}\}', r'俄语：\1', source_text)#匹配
-    source_text = re.sub(r'\{\{[Ll]ang-sa\|([^}{]+)\}\}', r'梵語：\1', source_text)#匹配
-    source_text = re.sub(r'\{\{[Ll]ang-th\|([^}{]+)\}\}', r'泰語：\1', source_text)#匹配
-    source_text = re.sub(r'\{\{[Ll]ang-uk\|([^}{]+)\}\}', r'烏克蘭語：\1', source_text)#匹配
-    source_text = re.sub(r'\{\{[Ll]ang\|[jekfr][ranou]\|((?:[^}{]|\n)+)\}\}', r'\1', source_text)#匹配[Ll]ang|[jekfr][ranou]|
-    source_text = re.sub(r'\{\{黑幕\|([^}{|]+)\}\}', r'\1', source_text)#黑幕1
-    source_text = re.sub(r'\{\{黑幕\|([^}{|]+)\|[^}{|]+\}\}', r'\1', source_text)#黑幕2
-    source_text = re.sub(r'\{\{(?:胡话|JK|jk)\|(?:1=)*([^}{|]+)(?:\|[^}{|]+)*?\}\}', r'\1', source_text)#胡话
+    # 转换部分基本模板
+    source_text = re.sub(r"\{\{(?:Zh|Zh-hans|Zh-hant|Ja icon|Ja|En|Ko|Ru|Fr|De)\}\}|\{\{Languageicon[^}{]*\}\}|\{\{clear\}\}|\{\{剧透\}\}|\{\{剧透提醒\}\}|<big>|</big>|<small>|</small>|'''''|'''|''|<br />|<br/>|<br[^>]*>|<del[^>]*>|</del>|<s[^>]*>|</s>|<span[^>]*>|</span>|<ins[^>]*>|</ins>|<u[^>]*>|</u>|<poem[^>]*>|</poem>|<div[^>]*>|</div>|\[\[File:[^\]\[]*\]\]|\[\[文件:[^\]\[]*\]\]|\[\[[Ii]mage:[^\]\[]*\]\]|\{\{#tag:div\|<img[^}{]*\}\}|\{\{#ifexpr.*\n.*\n.*\}\}\}\}", r'', source_text)  # 匹配并删除  #|<code>|</code>|<nowiki>|</nowiki>|<pre>|</pre>
+    source_text = re.sub(r'\[\[(?!File:)(?!文件:)(?![Ii]mage:)(?!#)[^[}{\]|]*\|(?!\*)([^}{[\]]*)\]\]', r'\1', source_text)  # 匹配[[实际页面|显示文字]]]
+    source_text = re.sub(r'\{\{[Rr]uby\|([^|}{]+)\|([^|}{]+)[|jaenzh]*\}\}', r'\1', source_text)  # 匹配[Rr]uby
+    source_text = re.sub(r'\[\[(?!File:)(?!文件:)(?![Ii]mage:)(?!#)[^[}{\]|]*\|(?!\*)([^}{[\]]*)\]\]', r'\1', source_text)  # 匹配[[实际页面|显示文字]]] for {{lang|ja|「[[致永远之星|{{ruby|永遠|とわ}}の星へ]]」}}
+    source_text = re.sub(r'\{\{[Ff]ont[^}{]*\|((?:[^}{]|\n)+)\}\}', r'\1', source_text)  # 匹配[Ff]ont
+    source_text = re.sub(r'\{\{[Ll]j\|((?:[^}{]|\n)+)\}\}', r'\1', source_text)  # 匹配[Ll]j
+    source_text = re.sub(r'\{\{[Cc]olor\|[^|}{]+\|((?:[^}{]+)|\n)\}\}', r'\1', source_text)  # 匹配color
+    source_text = re.sub(r'\{\{coloredlink\|[^|}{]+\|([^}{]+)\}\}', r'\1', source_text)  # 匹配coloredlink
+    source_text = re.sub(r'\{\{[Ll]ang-ja\|([^}{|]+)\|([^}{|]+)\}\}', r'日语：\1', source_text)  # {{lang-ja|'''まどひ白きの神隠し'''|ja}}
+    source_text = re.sub(r'\{\{[Ll]ang-de\|([^}{]+)\}\}', r'德语：\1', source_text)  # 匹配
+    source_text = re.sub(r'\{\{[Ll]ang-en\|([^}{]+)\}\}', r'英语：\1', source_text)  # 匹配
+    source_text = re.sub(r'\{\{[Ll]ang-fr\|([^}{]+)\}\}', r'法语：\1', source_text)  # 匹配
+    source_text = re.sub(r'\{\{[Ll]ang-ja\|([^}{]+)\}\}', r'日语：\1', source_text)  # 匹配
+    source_text = re.sub(r'\{\{[Ll]ang-ko\|([^}{]+)\}\}', r'韩语：\1', source_text)  # 匹配
+    source_text = re.sub(r'\{\{[Ll]ang-ru\|([^}{]+)\}\}', r'俄语：\1', source_text)  # 匹配
+    source_text = re.sub(r'\{\{[Ll]ang-sa\|([^}{]+)\}\}', r'梵語：\1', source_text)  # 匹配
+    source_text = re.sub(r'\{\{[Ll]ang-th\|([^}{]+)\}\}', r'泰語：\1', source_text)  # 匹配
+    source_text = re.sub(r'\{\{[Ll]ang-uk\|([^}{]+)\}\}', r'烏克蘭語：\1', source_text)  # 匹配
+    source_text = re.sub(r'\{\{[Ll]ang\|[jekfr][ranou]\|((?:[^}{]|\n)+)\}\}', r'\1', source_text)  # 匹配[Ll]ang|[jekfr][ranou]|
+    source_text = re.sub(r'\{\{黑幕\|([^}{|]+)\}\}', r'\1', source_text)  # 黑幕1
+    source_text = re.sub(r'\{\{黑幕\|([^}{|]+)\|[^}{|]+\}\}', r'\1', source_text)  # 黑幕2
+    source_text = re.sub(r'\{\{(?:胡话|JK|jk)\|(?:1=)*([^}{|]+)(?:\|[^}{|]+)*?\}\}', r'\1', source_text)  # 胡话
     source_text = re.sub(r'\{\{交叉颜色\|c1=#[0-9a-fA-F]{1,9}\|c2=#[0-9a-fA-F]{1,9}\|([^|}{]+)\|([^|}{]+)\|([^|}{]+)\}\}', r'\1\2\3', source_text)
     source_text = re.sub(r'\{\{交叉颜色\|c1=#[0-9a-fA-F]{1,9}\|c2=#[0-9a-fA-F]{1,9}\|([^|}{]+)\|([^|}{]+)\|([^|}{]+)\|([^|}{]+)\|([^|}{]+)\}\}', r'\1\2\3\4\5', source_text)
     source_text = re.sub(r'\{\{交叉颜色F\|#[0-9a-fA-F]{1,9},#[0-9a-fA-F]{1,9},#[0-9a-fA-F]{1,9}\|([^|}{]+)\}\}', r'\1', source_text)
     source_text = re.sub(r'\[\[([^\]\[]*)\]\]', r'\1', source_text)
-    source_text = re.sub(r"\[\[File:[^\]\[]*\]\]|\[\[文件:[^\]\[]*\]\]|\[\[[Ii]mage:[^\]\[]*\]\]", r'', source_text)#匹配并删除
-    source_text = '\n'.join([line.lstrip('*') for line in source_text.split('\n')])#删除所有行首的'*'
+    source_text = re.sub(r"\[\[File:[^\]\[]*\]\]|\[\[文件:[^\]\[]*\]\]|\[\[[Ii]mage:[^\]\[]*\]\]", r'', source_text)  # 匹配并删除
+    source_text = '\n'.join([line.lstrip('*') for line in source_text.split('\n')])  # 删除所有行首的'*'
     return source_text
+
 
 def escape(text):
     characters_to_escape = [')', '(', ']', '[', '|', '*', '+']
@@ -259,6 +261,7 @@ def escape(text):
     for char in characters_to_escape:
         escaped_text = escaped_text.replace(char, '\\' + char)
     return escaped_text
+
 
 def escape_s(text):
     characters_to_escape = [']', '[', '|', '*', '+']
@@ -269,9 +272,8 @@ def escape_s(text):
 
 
 def main():
-    pageid_list,api_url,source = get_config()
-    get_page(pageid_list,api_url,source)
-
+    pageid_list, api_url, source = get_config()
+    get_page(pageid_list, api_url, source)
 
 
 if __name__ == "__main__":
