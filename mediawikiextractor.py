@@ -1,0 +1,284 @@
+import regex as re
+import json
+import argparse
+import time
+import requests
+import os
+import sys
+import difflib
+from convert_wiki_text import convert
+
+def devide_list(input_list, chunk_size):
+    """
+    将列表拆分为指定长度的子列表。
+
+    参数：
+    input_list: 要拆分的列表。
+    chunk_size: 子列表的长度。
+
+    返回值：
+    包含子列表的列表。
+    """
+    if chunk_size <= 0:
+        raise ValueError("chunk_size必须大于0")
+
+    return [input_list[i:i + chunk_size] for i in range(0, len(input_list), chunk_size)]
+
+def get_config():
+    try:
+        with open(config_path, 'r', encoding='UTF-8') as file:
+            config_data = json.load(file)
+        pageid_list = config_data.get("page_id")
+        api_url = config_data.get("api")
+        source = config_data.get("source")
+    except FileNotFoundError:
+        print(f"配置文件 '{config_path}' 未找到")
+        sys.exit(1)
+    except json.JSONDecodeError:
+        print(f"配置文件 '{config_path}' 解析失败")
+        sys.exit(1)
+    except:
+        print(f"读取配置文件 '{config_path}' 时出现未知错误")
+        sys.exit(1)
+
+    return pageid_list,api_url,source
+
+def get_page(pageid_list,api_url,source):
+    params = {'action': 'query', 'format': 'json', 'prop': 'cirrusdoc', 'curtimestamp': 1, 'indexpageids': 1}
+    data = []
+    for pageidlist_devide in devide_list(pageid_list, 50):
+        param_pageids = '|'.join(map(str, pageidlist_devide))
+        params = {**params, **{'pageids': param_pageids}}
+        request_times = 0
+        while True:
+            try:
+                # 发送GET请求获取页面内容
+                requests_return = requests.get(api_url, params=params, timeout=(10, 30))
+                request_times = request_times + 1
+            except:
+                print(f"[error]请求获取页面内容失败，正在重试。请求的api:{api_url}，请求的参数{params}")
+                continue
+            else:
+                if requests_return.ok:
+                    requests_return: dict = requests_return.json()
+                    if 'batchcomplete' in requests_return:
+                        print(f"第{request_times}次请求，请求页面数量:{len(pageidlist_devide)}个。")
+                        break
+                    else:
+                        print("[error]响应不完整，可能因请求页面数据量过大而导致。请尝试调整请求的数据量。")
+        for pageid in pageidlist_devide:
+            p_cirrusdoc,title,version,timestamp,cirrusdoc = process_cirrusdoc(pageid,requests_return)
+            data.extend([{"title": title, "pageid": pageid, "version": version, "timestamp": timestamp, "source": source, "text": p_cirrusdoc , "cirrusdoc": cirrusdoc}])
+            with open(output_path, 'w', encoding='UTF-8') as output_file:
+                            json.dump(data, output_file, ensure_ascii=False, indent=4)
+
+def process_cirrusdoc(pageid,requests_return):
+    # 获取页面json
+    rawpagejson = requests_return['query']['pages'][str(pageid)]
+    # 获取页面标题
+    title = rawpagejson['title']
+    # 获取页面更新时间
+    timestamp = rawpagejson['cirrusdoc'][0]['source']['timestamp']
+    # 获取页面版本
+    version = rawpagejson['cirrusdoc'][0]['source']['version']
+    # 获取页面中的标题
+    headings = rawpagejson['cirrusdoc'][0]['source']['heading']
+    # 获取页面文本
+    cirrusdoc = rawpagejson['cirrusdoc'][0]['source']['text']
+    # 打印当前处理
+    print(f"当前处理：[标题]{title}[页面id]{pageid}[最后修改]{timestamp}[版本]{version},")
+    # 获取原页面文本
+    source_text = rawpagejson['cirrusdoc'][0]['source']['source_text']
+    # 处理原页面文本
+    source_text_p = preprocess_source_text(source_text)
+
+    # 将页面中的标题转换为正则表达式
+    headings_pattern = '|'.join(re.escape(heading) for heading in headings)
+    headings_pattern1 = f"\n*=+(?: )*(?:{headings_pattern})(?: )*=+\n*"
+    matching_headings1 = re.findall(headings_pattern1, source_text_p)#获取所有带=的标题
+    matching_headings2 = findall('[^\n}}{{><=]*', headings_pattern1, '(?!=+)[^\n}}{{><]*', source_text_p)#获取所有带=的标题与上下文
+
+    # 恢复原标题
+    cirrusdoc2 = cirrusdoc
+    # 判断带=的标题是否与带=的标题与上下文数量匹配
+    if len(matching_headings1) == len(matching_headings2):
+        n = 0
+        while n < len(matching_headings1):
+            # 替换带=的标题为正则表达式
+            pattern = re.escape(re.sub(headings_pattern1, rf'_space_placeholder___', escape_s(matching_headings2[n])))
+            pattern = re.sub(r"_space_placeholder___", rf'(?: +|(?P<equal_sign>=+))',pattern)
+            # 判断带=的标题与上下文是否有上下文
+            if pattern == "(?: +|(?P<equal_sign>=+))":
+                print(f"页面\"{title}\"中的标题：{repr(matching_headings2[n])}无法匹配")
+            else:
+                # 替换带=的标题为正则表达式
+                cirrusdoc2 = re.sub(pattern, rf'\g<equal_sign>{matching_headings2[n]}', cirrusdoc2)
+            
+            n = n + 1
+
+    # 恢复原换行符
+    print('恢复原换行符', end="\r")
+    cirrusdoc3 = cirrusdoc2
+    matching_newline = findall('[^\n}}{{><]+', '\n+', '[^\n}}{{><]+', source_text_p)#获取所有'\n'的上下文
+    n = 0
+    while n < len(matching_newline):
+        pattern = re.sub(r"\n+", rf'( +)', escape(matching_newline[n]))
+        if pattern != "( +)":
+            cirrusdoc3 = re.sub(pattern, rf'{matching_newline[n]}', cirrusdoc3)
+        n = n + 1
+
+    # 清理cirrusdoc3
+    print('开始清理', end="\r")
+    cirrusdoc4 = clear_text(cirrusdoc3,source_text, source_text_p)
+    return cirrusdoc4,title,version,timestamp,cirrusdoc
+
+def clear_text(cirrusdoc,source_text,source_text_p):
+    """
+    清理cirrusdoc
+
+    参数：
+    cirrusdoc：需要清理的字符串
+    source_text：原始字符串
+
+    返回值：
+    清理后的字符串
+    """
+    # 1.清理图片
+
+    c_source_text = re.sub(r"<big>|</big>|<small>|</small>|'''''|'''|''|<br />|<br/>|<br[^>]*>|<del[^>]*>|</del>|<s[^>]*>|</s>|<span[^>]*>|</span>|<ins[^>]*>|</ins>|<u[^>]*>|</u>|<poem[^>]*>|</poem>|<div[^>]*>|</div>", "", source_text)
+    
+    c1_source_text = re.sub(r'\{\{[Ll]ang\|[jekfr][ranou]\|((?:[^}{]|\n)+)\}\}', r'\1', c_source_text)#匹配[Ll]ang|[jekfr][ranou]|
+    c2_source_text = re.sub(r'\[\[([^\]]*)\]\]', r'\1', c1_source_text)
+    c3_source_text = re.sub(r'\[https?://[^}{\]\[ ]+ ([^\]\[]+)\]', r'\1', c1_source_text)
+    print('清理图片', end="\r")
+    gallery = re.findall('<gallery[^>]*>(?:[^<]|\n)+</gallery>', c2_source_text)
+
+    for i in gallery:
+        text = re.sub(r'<gallery[^>]*>(?:\n)*((?:[^<]|\n)+?)(?:\n)*</gallery>', r'\1', i)
+        text = re.sub(r'(?:File:|文件:|[Ii]mage:)*[^\|\n]+\|', r'', text)
+        pattern = re.sub(r'\n+', r'( +)', text)
+        cirrusdoc = re.sub(pattern, r"", cirrusdoc)
+
+    print('清理注释', end="\r")
+    # 2.清理注释
+    ref = re.findall('<ref[^>]*>(?:[^<]|\n)+</ref>', c3_source_text)
+    for i in ref:
+        pattern = re.sub(r'<ref[^>]*>((?:[^<]|\n)+)</ref>', r' *\1 *', i)
+        cirrusdoc = re.sub(pattern, r"", cirrusdoc)
+
+    print('清理本站外文字链接', end="\r")
+    # 3.清理本站外文字链接
+    external_link = re.findall(r'\[https?://[^}{\]\[ ]+ [^\]\[]+\]', source_text_p)
+    for i in external_link:
+        pattern = re.sub(r'\[https?://[^}{\]\[ ]+ ([^\]\[]+)\]', r'\1', i)
+        link = re.sub(r'\[(https?://[^}{\]\[ ]+) ([^\]\[]+)\]', r'\1', i)
+        cirrusdoc = re.sub(f"{re.escape(pattern)}(?!.*{re.escape(pattern)})", rf"{pattern}:{link}", cirrusdoc)
+
+    return cirrusdoc
+
+
+
+def findall(pattern1, pattern2, pattern3,text):
+    """
+    匹配所有pattern1+pattern2+pattern3
+
+    参数：
+    pattern1: 开头可与上一次匹配重叠正表达式
+    pattern2: 不重叠匹配的正表达式
+    pattern3：末尾可与上一次匹配重叠的正表达式
+
+    返回值：
+    包含所有匹配项的列表。
+    """
+    # 定义一个空列表，用于存放匹配结果
+    matchs = []
+    # 将pattern2和pattern3拼接成一个pattern
+    pattern = f"{pattern2}{pattern3}"
+    # 使用re模块的findall方法，查找text中匹配pattern的所有结果
+    match1 = re.findall(pattern, text)
+    # 定义变量n，用于记录匹配结果的数量
+    n = 0
+    # 循环遍历match1中的每一个结果
+    while n < len(match1):
+        # 将pattern1和match1中第n个结果拼接成一个字符串
+        pattern = f"{pattern1}{re.escape(match1[n])}"
+        # 使用re模块的findall方法，查找text中匹配pattern的所有结果
+        match2 = re.findall(pattern, text)
+        # 定义变量nn，用于记录匹配结果的数量
+        nn = 0
+        # 循环遍历match2中的每一个结果
+        while nn < len(match2):
+            # 将match2中第nn个结果添加到matchs列表中
+            matchs.append(match2[nn])
+            # 将nn加1
+            nn = nn + 1
+        
+        # 将n加1
+        n = n + 1
+    
+    # 返回matchs列表
+    return matchs
+    
+def preprocess_source_text(source_text):
+    #简繁转换
+    source_text = convert(source_text)
+    #转换部分基本模板
+    source_text = re.sub(r"\{\{(?:Zh|Zh-hans|Zh-hant|Ja icon|Ja|En|Ko|Ru|Fr|De)\}\}|\{\{Languageicon[^}{]*\}\}|\{\{clear\}\}|\{\{剧透\}\}|\{\{剧透提醒\}\}|<big>|</big>|<small>|</small>|'''''|'''|''|<br />|<br/>|<br[^>]*>|<del[^>]*>|</del>|<s[^>]*>|</s>|<span[^>]*>|</span>|<ins[^>]*>|</ins>|<u[^>]*>|</u>|<poem[^>]*>|</poem>|<div[^>]*>|</div>|\[\[File:[^\]\[]*\]\]|\[\[文件:[^\]\[]*\]\]|\[\[[Ii]mage:[^\]\[]*\]\]|\{\{#tag:div\|<img[^}{]*\}\}|\{\{#ifexpr.*\n.*\n.*\}\}\}\}", r'', source_text)#匹配并删除#|<code>|</code>|<nowiki>|</nowiki>|<pre>|</pre>
+    source_text = re.sub(r'\[\[(?!File:)(?!文件:)(?![Ii]mage:)(?!#)[^[}{\]|]*\|(?!\*)([^}{[\]]*)\]\]', r'\1', source_text)#匹配[[实际页面|显示文字]]]
+    source_text = re.sub(r'\{\{[Rr]uby\|([^|}{]+)\|([^|}{]+)[|jaenzh]*\}\}', r'\1', source_text) #匹配[Rr]uby
+    source_text = re.sub(r'\[\[(?!File:)(?!文件:)(?![Ii]mage:)(?!#)[^[}{\]|]*\|(?!\*)([^}{[\]]*)\]\]', r'\1', source_text)#匹配[[实际页面|显示文字]]] for {{lang|ja|「[[致永远之星|{{ruby|永遠|とわ}}の星へ]]」}}
+    source_text = re.sub(r'\{\{[Ff]ont[^}{]*\|((?:[^}{]|\n)+)\}\}', r'\1', source_text)#匹配[Ff]ont
+    source_text = re.sub(r'\{\{[Ll]j\|((?:[^}{]|\n)+)\}\}', r'\1', source_text)#匹配[Ll]j
+    source_text = re.sub(r'\{\{[Cc]olor\|[^|}{]+\|((?:[^}{]+)|\n)\}\}', r'\1', source_text)#匹配color
+    source_text = re.sub(r'\{\{coloredlink\|[^|}{]+\|([^}{]+)\}\}', r'\1', source_text)#匹配coloredlink
+    source_text = re.sub(r'\{\{[Ll]ang-ja\|([^}{|]+)\|([^}{|]+)\}\}', r'日语：\1', source_text)#{{lang-ja|'''まどひ白きの神隠し'''|ja}}
+    source_text = re.sub(r'\{\{[Ll]ang-de\|([^}{]+)\}\}', r'德语：\1', source_text)#匹配
+    source_text = re.sub(r'\{\{[Ll]ang-en\|([^}{]+)\}\}', r'英语：\1', source_text)#匹配
+    source_text = re.sub(r'\{\{[Ll]ang-fr\|([^}{]+)\}\}', r'法语：\1', source_text)#匹配
+    source_text = re.sub(r'\{\{[Ll]ang-ja\|([^}{]+)\}\}', r'日语：\1', source_text)#匹配
+    source_text = re.sub(r'\{\{[Ll]ang-ko\|([^}{]+)\}\}', r'韩语：\1', source_text)#匹配
+    source_text = re.sub(r'\{\{[Ll]ang-ru\|([^}{]+)\}\}', r'俄语：\1', source_text)#匹配
+    source_text = re.sub(r'\{\{[Ll]ang-sa\|([^}{]+)\}\}', r'梵語：\1', source_text)#匹配
+    source_text = re.sub(r'\{\{[Ll]ang-th\|([^}{]+)\}\}', r'泰語：\1', source_text)#匹配
+    source_text = re.sub(r'\{\{[Ll]ang-uk\|([^}{]+)\}\}', r'烏克蘭語：\1', source_text)#匹配
+    source_text = re.sub(r'\{\{[Ll]ang\|[jekfr][ranou]\|((?:[^}{]|\n)+)\}\}', r'\1', source_text)#匹配[Ll]ang|[jekfr][ranou]|
+    source_text = re.sub(r'\{\{黑幕\|([^}{|]+)\}\}', r'\1', source_text)#黑幕1
+    source_text = re.sub(r'\{\{黑幕\|([^}{|]+)\|[^}{|]+\}\}', r'\1', source_text)#黑幕2
+    source_text = re.sub(r'\{\{(?:胡话|JK|jk)\|(?:1=)*([^}{|]+)(?:\|[^}{|]+)*?\}\}', r'\1', source_text)#胡话
+    source_text = re.sub(r'\{\{交叉颜色\|c1=#[0-9a-fA-F]{1,9}\|c2=#[0-9a-fA-F]{1,9}\|([^|}{]+)\|([^|}{]+)\|([^|}{]+)\}\}', r'\1\2\3', source_text)
+    source_text = re.sub(r'\{\{交叉颜色\|c1=#[0-9a-fA-F]{1,9}\|c2=#[0-9a-fA-F]{1,9}\|([^|}{]+)\|([^|}{]+)\|([^|}{]+)\|([^|}{]+)\|([^|}{]+)\}\}', r'\1\2\3\4\5', source_text)
+    source_text = re.sub(r'\{\{交叉颜色F\|#[0-9a-fA-F]{1,9},#[0-9a-fA-F]{1,9},#[0-9a-fA-F]{1,9}\|([^|}{]+)\}\}', r'\1', source_text)
+    source_text = re.sub(r'\[\[([^\]\[]*)\]\]', r'\1', source_text)
+    source_text = re.sub(r"\[\[File:[^\]\[]*\]\]|\[\[文件:[^\]\[]*\]\]|\[\[[Ii]mage:[^\]\[]*\]\]", r'', source_text)#匹配并删除
+    source_text = '\n'.join([line.lstrip('*') for line in source_text.split('\n')])#删除所有行首的'*'
+    return source_text
+
+def escape(text):
+    characters_to_escape = [')', '(', ']', '[', '|', '*', '+']
+    escaped_text = text
+    for char in characters_to_escape:
+        escaped_text = escaped_text.replace(char, '\\' + char)
+    return escaped_text
+
+def escape_s(text):
+    characters_to_escape = [']', '[', '|', '*', '+']
+    escaped_text = text
+    for char in characters_to_escape:
+        escaped_text = escaped_text.replace(char, '\\' + char)
+    return escaped_text
+
+
+def main():
+    pageid_list,api_url,source = get_config()
+    get_page(pageid_list,api_url,source)
+
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='')
+    parser.add_argument('--config', required=True, help='Path to config file')
+    parser.add_argument('--output', required=True, help='Path to output file')
+    args = parser.parse_args()
+    config_path = args.config
+    output_path = args.output
+    main()
