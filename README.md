@@ -2,8 +2,8 @@
 
 ## 简介
 
-mediawikiextractor 是一个用于从 MediaWiki 网站中提取数据的 Python 脚本。
-从mediawiki网站中获取cirrusdoc，处理后并保存为json文件。
+mediawikiextractor 是一个用于从 MediaWiki 网站中提取数据的 Python 脚本。  
+从mediawiki网站中获取cirrusdoc，处理后并保存为json文件。  
 目前仅适用于萌娘百科，其他 MediaWiki 网站需要修改部分表达式。
 
 ## 使用
