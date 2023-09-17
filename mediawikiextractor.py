@@ -202,7 +202,7 @@ def process_cirrusdoc(pageid, requests_return, cleaning_rule, exclude_titles):
     print('恢复原换行符', end="\r")
     cirrusdoc3 = cirrusdoc2
     matching_newline = sorted(findall('[^\n}}{{><]+', '\n+', '[^\n}}{{><]+', source_text_p),  # 获取所有'\n'的上下文
-                              key=lambda x: len(x), reverse=True)  # 使用sorted函数按照元素长度从长到短排序
+                              key=len, reverse=True)  # 使用sorted函数按照元素长度从长到短排序
     n = 0
     while n < len(matching_newline):
         try:
