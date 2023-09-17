@@ -201,7 +201,8 @@ def process_cirrusdoc(pageid, requests_return, cleaning_rule, exclude_titles):
     # 恢复原换行符
     print('恢复原换行符', end="\r")
     cirrusdoc3 = cirrusdoc2
-    matching_newline = findall('[^\n}}{{><]+', '\n+', '[^\n}}{{><]+', source_text_p)  # 获取所有'\n'的上下文
+    matching_newline = sorted(findall('[^\n}}{{><]+', '\n+', '[^\n}}{{><]+', source_text_p),  # 获取所有'\n'的上下文
+                              key=lambda x: len(x), reverse=True)  # 使用sorted函数按照元素长度从长到短排序
     n = 0
     while n < len(matching_newline):
         try:
@@ -294,6 +295,8 @@ def findall(pattern1, pattern2, pattern3, text):
         match2 = re.findall(pattern, text)
         # 定义变量nn，用于记录匹配结果的数量
         nn = 0
+        # 去重
+        match2 = sorted(list(set(match2)))
         # 循环遍历match2中的每一个结果
         while nn < len(match2):
             # 将match2中第nn个结果添加到matchs列表中
@@ -303,7 +306,8 @@ def findall(pattern1, pattern2, pattern3, text):
 
         # 将n加1
         n = n + 1
-
+    # 去重
+    matchs = sorted(list(set(matchs)))
     # 返回matchs列表
     return matchs
 
@@ -344,8 +348,9 @@ def preprocess_source_text(source_text):
 
 
 def escape(text):
-    characters_to_escape = [')', '(', ']', '[', '|', '*', '+', '?', '\\', ':']
+    characters_to_escape = ['\\', ')', '(', ']', '[', '|', '*', '+', '?', ':']
     escaped_text = text
+
     for char in characters_to_escape:
         escaped_text = escaped_text.replace(char, '\\' + char)
     return escaped_text
