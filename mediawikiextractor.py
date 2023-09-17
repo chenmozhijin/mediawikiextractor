@@ -111,10 +111,10 @@ def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles):
     '''
     params = {'action': 'query', 'format': 'json', 'prop': 'cirrusdoc', 'curtimestamp': 1, 'indexpageids': 1}
     data = []
+    request_times = 0
     for pageidlist_devide in devide_list(pageid_list, 50):
         param_pageids = '|'.join(map(str, pageidlist_devide))
         params = {**params, **{'pageids': param_pageids}}
-        request_times = 0
         while True:
             try:
                 # 发送GET请求获取页面内容
