@@ -3,6 +3,8 @@ import json
 import argparse
 import requests
 import sys
+import datetime
+import time
 from convert_wiki_text import convert
 
 
@@ -27,9 +29,13 @@ def get_config():
     try:
         with open(config_path, 'r', encoding='UTF-8') as file:
             config_data = json.load(file)
-        pageid_list = config_data.get("page_id")
+        pageid_list = config_data.get("page_ids")
         api_url = config_data.get("api")
         source = config_data.get("source")
+        categories = config_data.get("categories")
+        exclude_ids = config_data.get("exclude_ids")
+        exclude_categories = config_data.get("exclude_categories")
+        cleaning_rule = config_data.get("cleaning_rule")
     except FileNotFoundError:
         print(f"配置文件 '{config_path}' 未找到")
         sys.exit(1)
@@ -40,10 +46,38 @@ def get_config():
         print(f"读取配置文件 '{config_path}' 时出现未知错误")
         sys.exit(1)
 
-    return pageid_list, api_url, source
+    return pageid_list, api_url, source, categories, exclude_ids, exclude_categories, cleaning_rule
 
 
-def get_page(pageid_list, api_url, source):
+def get_page_ids(api_url, category):
+    # 设置请求参数
+    params = {
+        'action': 'query',
+        'format': 'json',
+        'list': 'categorymembers',
+        'cmtitle': f'Category:{category}',
+        'cmlimit': 500
+    }
+
+    page_ids = []
+
+    # 循环请求，直到获取全部页面
+    while True:
+        response = requests.get(api_url, params=params)
+        data = response.json()
+
+        for item in data['query']['categorymembers']:
+            page_ids.append(item['pageid'])
+
+        if 'continue' in data:
+            params['cmcontinue'] = data['continue']['cmcontinue']
+        else:
+            break
+
+    return page_ids
+
+
+def get_page(pageid_list, api_url, source, cleaning_rule):
     params = {'action': 'query', 'format': 'json', 'prop': 'cirrusdoc', 'curtimestamp': 1, 'indexpageids': 1}
     data = []
     for pageidlist_devide in devide_list(pageid_list, 50):
@@ -67,13 +101,13 @@ def get_page(pageid_list, api_url, source):
                     else:
                         print("[error]响应不完整，可能因请求页面数据量过大而导致。请尝试调整请求的数据量。")
         for pageid in pageidlist_devide:
-            p_cirrusdoc, title, version, timestamp, cirrusdoc = process_cirrusdoc(pageid, requests_return)
+            p_cirrusdoc, title, version, timestamp, cirrusdoc = process_cirrusdoc(pageid, requests_return, cleaning_rule)
             data.extend([{"title": title, "pageid": pageid, "version": version, "timestamp": timestamp, "source": source, "text": p_cirrusdoc, "cirrusdoc": cirrusdoc}])
             with open(output_path, 'w', encoding='UTF-8') as output_file:
                 json.dump(data, output_file, ensure_ascii=False, indent=4)
 
 
-def process_cirrusdoc(pageid, requests_return):
+def process_cirrusdoc(pageid, requests_return, cleaning_rule):
     # 获取页面json
     rawpagejson = requests_return['query']['pages'][str(pageid)]
     # 获取页面标题
@@ -130,11 +164,11 @@ def process_cirrusdoc(pageid, requests_return):
 
     # 清理cirrusdoc3
     print('开始清理', end="\r")
-    cirrusdoc4 = clear_text(cirrusdoc3, source_text, source_text_p)
+    cirrusdoc4 = clear_text(cirrusdoc3, source_text, source_text_p, cleaning_rule)
     return cirrusdoc4, title, version, timestamp, cirrusdoc
 
 
-def clear_text(cirrusdoc, source_text, source_text_p):
+def clear_text(cirrusdoc, source_text, source_text_p, cleaning_rule):
     """
     清理cirrusdoc
 
@@ -174,6 +208,11 @@ def clear_text(cirrusdoc, source_text, source_text_p):
         pattern = re.sub(r'\[https?://[^}{\]\[ ]+ ([^\]\[]+)\]', r'\1', i)
         link = re.sub(r'\[(https?://[^}{\]\[ ]+) ([^\]\[]+)\]', r'\1', i)
         cirrusdoc = re.sub(f"{re.escape(pattern)}(?!.*{re.escape(pattern)})", rf"{pattern}:{link}", cirrusdoc)
+
+    # 4.自定义清理
+    print('自定义清理', end="\r")
+    for pattern in cleaning_rule:
+        cirrusdoc = re.sub(pattern, r"", cirrusdoc)
 
     return cirrusdoc
 
@@ -272,8 +311,42 @@ def escape_s(text):
 
 
 def main():
-    pageid_list, api_url, source = get_config()
-    get_page(pageid_list, api_url, source)
+    '''
+    主函数，用于获取页面id，并获取页面信息
+    '''
+    current_time = datetime.datetime.now()
+    print("mediawikiextractor\n运行开始于：", current_time)
+    pageid_list, api_url, source, categories, exclude_ids, exclude_categories, cleaning_rule = get_config()
+    if categories:
+        for category in categories:
+            print(f"正在获取分类{category}中的所有页面id" + " " * 30, end="\r")
+            # 获取指定Category的页面id
+            page_ids = get_page_ids(api_url, category)
+            # 将获取到的页面id添加到pageid_list中
+            pageid_list.extend(page_ids)
+            time.sleep(1)  # 设置睡眠时间，防止被wikimedia服务器封禁IP
+    else:
+        print("未设置要获取的Category，跳过获取categories中的页面id")
+    if exclude_categories:
+        for exclude_category in exclude_categories:
+            print(f"正在获取分类{exclude_category}中的所有页面id" + " " * 30, end="\r")
+            # 调用get_page_ids函数，获取exclude_category中的页面id
+            page_ids = get_page_ids(api_url, exclude_category)
+            # 将获取的页面id添加到exclude_ids中
+            exclude_ids.extend(page_ids)
+            time.sleep(1)  # 设置睡眠时间，防止被wikimedia服务器封禁IP
+    else:
+        # 如果exclude_categories中没有元素，则输出提示信息
+        print("未设置要排除的Category，跳过获取exclude_categories中的页面id")
+    if exclude_ids:
+        # 如果exclude_ids存在，则删除pageid_list中存在于exclude_ids的元素
+        pageid_list = [x for x in pageid_list if x not in exclude_ids]
+    if not pageid_list:
+        # 如果pageid_list为空，则打印提示信息并退出程序
+        print("没有需要处理的页面id，程序结束")
+        sys.exit(1)
+    pageid_list = sorted(list(set(pageid_list)))
+    get_page(pageid_list, api_url, source, cleaning_rule)
 
 
 if __name__ == "__main__":
