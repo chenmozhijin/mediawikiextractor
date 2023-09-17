@@ -189,7 +189,9 @@ def process_cirrusdoc(pageid, requests_return, cleaning_rule, exclude_titles):
             pattern = re.sub(r"_space_placeholder___", r'(?: +|(?P<equal_sign>=+))', pattern)
             # 判断带=的标题与上下文是否有上下文
             if pattern == "(?: +|(?P<equal_sign>=+))":
-                print(f"页面\"{title}\"中的标题：{repr(matching_headings2[n])}无法匹配")
+                print(f"页面\"{title}\"中的段落标题：{repr(matching_headings2[n])}无上下文，无法匹配")
+            elif len(pattern) <= 30:  # 原本"(?: +|(?P<equal_sign>=+))"有25个字符，要求至少5个上下文匹配
+                print(f"页面\"{title}\"中的段落标题：{repr(matching_headings2[n])}上下文过少（少于5），跳过匹配")
             else:
                 # 替换带=的标题为正则表达式
                 cirrusdoc2 = re.sub(pattern, rf'\g<equal_sign>{matching_headings2[n]}', cirrusdoc2)
@@ -202,11 +204,13 @@ def process_cirrusdoc(pageid, requests_return, cleaning_rule, exclude_titles):
     matching_newline = findall('[^\n}}{{><]+', '\n+', '[^\n}}{{><]+', source_text_p)  # 获取所有'\n'的上下文
     n = 0
     while n < len(matching_newline):
-        pattern = re.sub(r"\n+", r'( +)', escape(matching_newline[n]))
-        if pattern != "( +)":
-            cirrusdoc3 = re.sub(pattern, rf'{matching_newline[n]}', cirrusdoc3)
+        try:
+            pattern = re.sub(r"\n+", r'( +)', escape(matching_newline[n]))
+            if pattern != "( +)":
+                cirrusdoc3 = re.sub(rf"{pattern}", rf'{matching_newline[n]}', cirrusdoc3)
+        except BaseException as e:
+            print(f"页面\"{title}\"中的换行符：{repr(matching_newline[n])}匹配时遇到问题,错误:\"{e}\"")
         n = n + 1
-
     # 清理cirrusdoc3
     print('开始清理', end="\r")
     cirrusdoc4 = clear_text(cirrusdoc3, source_text, source_text_p, cleaning_rule)
@@ -340,15 +344,7 @@ def preprocess_source_text(source_text):
 
 
 def escape(text):
-    characters_to_escape = [')', '(', ']', '[', '|', '*', '+', '?']
-    escaped_text = text
-    for char in characters_to_escape:
-        escaped_text = escaped_text.replace(char, '\\' + char)
-    return escaped_text
-
-
-def escape_s(text):
-    characters_to_escape = [']', '[', '|', '*', '+', '?']
+    characters_to_escape = [')', '(', ']', '[', '|', '*', '+', '?', '\\', ':']
     escaped_text = text
     for char in characters_to_escape:
         escaped_text = escaped_text.replace(char, '\\' + char)
