@@ -295,7 +295,7 @@ def preprocess_source_text(source_text):
 
 
 def escape(text):
-    characters_to_escape = [')', '(', ']', '[', '|', '*', '+']
+    characters_to_escape = [')', '(', ']', '[', '|', '*', '+', '?']
     escaped_text = text
     for char in characters_to_escape:
         escaped_text = escaped_text.replace(char, '\\' + char)
@@ -303,7 +303,7 @@ def escape(text):
 
 
 def escape_s(text):
-    characters_to_escape = [']', '[', '|', '*', '+']
+    characters_to_escape = [']', '[', '|', '*', '+', '?']
     escaped_text = text
     for char in characters_to_escape:
         escaped_text = escaped_text.replace(char, '\\' + char)
