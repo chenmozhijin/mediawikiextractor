@@ -8,10 +8,10 @@ mediawikiextractor 是一个用于从 MediaWiki 网站中提取数据的 Python 
 
 ## 使用
 
-1.需要安装'regex'、'requests'库
+1.需要安装'regex'、'requests'、'opencc'库
 
 ```sh
- pip install regex requests
+pip install regex requests opencc
 ```
 
 2.运行脚本
