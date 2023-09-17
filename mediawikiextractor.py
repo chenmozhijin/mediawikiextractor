@@ -72,13 +72,15 @@ def get_page_ids(api_url, category):
                 response.raise_for_status()
                 # 解析响应内容
                 data = response.json()
-                break
+
             except requests.exceptions.RequestException as e:
                 # 打印错误信息
                 print(f"请求错误:{e},十秒后重试")
                 # 等待10秒
                 time.sleep(10)
                 print("重试")
+            else:
+                break
 
         # 遍历查询结果
         for item in data['query']['categorymembers']:
@@ -118,9 +120,11 @@ def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles):
                 # 发送GET请求获取页面内容
                 requests_return = requests.get(api_url, params=params, timeout=(10, 30))
                 request_times = request_times + 1
-            except BaseException:
-                print(f"[error]请求获取页面内容失败，正在重试。请求的api:{api_url}，请求的参数{params}")
-                continue
+            except BaseException as e:
+                print(f"[error]请求获取页面内容失败，正在重试。请求的api:{api_url}，请求的参数{params}，错误:{e},十秒后重试")
+                # 等待10秒
+                time.sleep(10)
+                print("重试")
             else:
                 if requests_return.ok:
                     requests_return: dict = requests_return.json()
