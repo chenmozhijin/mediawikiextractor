@@ -3,7 +3,7 @@
         "source": "moegril",
         "api": "https://zh.moegirl.org/api.php",
         "page_ids": [],
-        "categories": ["千恋万花"],
+        "categories": ["恋爱冒险游戏", "视觉小说","Little_Busters!","AIR","Angel_Beats","CLANNAD","Charlotte","Harmonia(Key)#","Kanon","LOOPERS","MOON.","LUNARiA_-Virtualized_Moonchild-","ONE～辉之季节～","Rewrite","Summer_Pockets","星之梦","星之终途","ATRI","爱上火车","初音岛","9-nine-","常轨脱离Creative","住在拔作岛上的贫乳应该如何是好？","苍之彼方的四重奏","美少女万华镜","缘之空","灰色系列","少女领域","千恋万花","FORTUNE ARTERIAL","柚子社作品","Palette作品","Smile作品","Recette作品","BUG SYSTEM作品","SWEET&TEA作品","猫猫社作品","YAMAYURI GAMES作品","Navel作品","Navel honeybell作品","AUGUST作品","Whirlpool作品","戏画作品"],
         "exclude_ids": [561570,280950,28533],
         "exclude_categories": ["网页游戏"],
         "exclude_titles": ["Category:.*","Template:.*","User:.*"],
