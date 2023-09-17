@@ -36,6 +36,7 @@ def get_config():
         exclude_ids = config_data.get("exclude_ids")
         exclude_categories = config_data.get("exclude_categories")
         cleaning_rule = config_data.get("cleaning_rule")
+        exclude_titles = config_data.get("exclude_titles")
     except FileNotFoundError:
         print(f"配置文件 '{config_path}' 未找到")
         sys.exit(1)
@@ -46,7 +47,7 @@ def get_config():
         print(f"读取配置文件 '{config_path}' 时出现未知错误")
         sys.exit(1)
 
-    return pageid_list, api_url, source, categories, exclude_ids, exclude_categories, cleaning_rule
+    return pageid_list, api_url, source, categories, exclude_ids, exclude_categories, cleaning_rule, exclude_titles
 
 
 def get_page_ids(api_url, category):
@@ -77,7 +78,7 @@ def get_page_ids(api_url, category):
     return page_ids
 
 
-def get_page(pageid_list, api_url, source, cleaning_rule):
+def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles):
     params = {'action': 'query', 'format': 'json', 'prop': 'cirrusdoc', 'curtimestamp': 1, 'indexpageids': 1}
     data = []
     for pageidlist_devide in devide_list(pageid_list, 50):
@@ -101,13 +102,17 @@ def get_page(pageid_list, api_url, source, cleaning_rule):
                     else:
                         print("[error]响应不完整，可能因请求页面数据量过大而导致。请尝试调整请求的数据量。")
         for pageid in pageidlist_devide:
-            p_cirrusdoc, title, version, timestamp, cirrusdoc = process_cirrusdoc(pageid, requests_return, cleaning_rule)
+            result = process_cirrusdoc(pageid, requests_return, cleaning_rule, exclude_titles)
+            if not result:
+                break
+            else:
+                p_cirrusdoc, title, version, timestamp, cirrusdoc = result
             data.extend([{"title": title, "pageid": pageid, "version": version, "timestamp": timestamp, "source": source, "text": p_cirrusdoc, "cirrusdoc": cirrusdoc}])
             with open(output_path, 'w', encoding='UTF-8') as output_file:
                 json.dump(data, output_file, ensure_ascii=False, indent=4)
 
 
-def process_cirrusdoc(pageid, requests_return, cleaning_rule):
+def process_cirrusdoc(pageid, requests_return, cleaning_rule, exclude_titles):
     # 获取页面json
     rawpagejson = requests_return['query']['pages'][str(pageid)]
     # 获取页面标题
@@ -120,6 +125,14 @@ def process_cirrusdoc(pageid, requests_return, cleaning_rule):
     headings = rawpagejson['cirrusdoc'][0]['source']['heading']
     # 获取页面文本
     cirrusdoc = rawpagejson['cirrusdoc'][0]['source']['text']
+    # 使用re模块的search函数来查找匹配
+    for exclude_title in exclude_titles:
+        match = re.search(exclude_title, title)  # 排除标题
+        # 如果找到匹配，则match对象不为None
+        if match:
+            print(f"排除标题：{title}")
+            return
+
     # 打印当前处理
     print(f"当前处理：[标题]{title}[页面id]{pageid}[最后修改]{timestamp}[版本]{version},")
     # 获取原页面文本
@@ -140,7 +153,7 @@ def process_cirrusdoc(pageid, requests_return, cleaning_rule):
         n = 0
         while n < len(matching_headings1):
             # 替换带=的标题为正则表达式
-            pattern = re.escape(re.sub(headings_pattern1, r'_space_placeholder___', escape_s(matching_headings2[n])))
+            pattern = re.escape(re.sub(headings_pattern1, r'_space_placeholder___', matching_headings2[n]))
             pattern = re.sub(r"_space_placeholder___", r'(?: +|(?P<equal_sign>=+))', pattern)
             # 判断带=的标题与上下文是否有上下文
             if pattern == "(?: +|(?P<equal_sign>=+))":
@@ -316,7 +329,7 @@ def main():
     '''
     current_time = datetime.datetime.now()
     print("mediawikiextractor\n运行开始于：", current_time)
-    pageid_list, api_url, source, categories, exclude_ids, exclude_categories, cleaning_rule = get_config()
+    pageid_list, api_url, source, categories, exclude_ids, exclude_categories, cleaning_rule, exclude_titles = get_config()
     if categories:
         for category in categories:
             print(f"正在获取分类{category}中的所有页面id" + " " * 30, end="\r")
@@ -346,7 +359,7 @@ def main():
         print("没有需要处理的页面id，程序结束")
         sys.exit(1)
     pageid_list = sorted(list(set(pageid_list)))
-    get_page(pageid_list, api_url, source, cleaning_rule)
+    get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles)
 
 
 if __name__ == "__main__":
