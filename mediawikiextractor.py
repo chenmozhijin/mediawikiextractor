@@ -64,21 +64,49 @@ def get_page_ids(api_url, category):
 
     # 循环请求，直到获取全部页面
     while True:
-        response = requests.get(api_url, params=params)
-        data = response.json()
+        while True:
+            try:
+                # 发送get请求，获取响应
+                response = requests.get(api_url, params=params, timeout=100)
+                # 检查响应状态码是否正确
+                response.raise_for_status()
+                # 解析响应内容
+                data = response.json()
+                break
+            except requests.exceptions.RequestException as e:
+                # 打印错误信息
+                print(f"请求错误:{e},十秒后重试")
+                # 等待10秒
+                time.sleep(10)
+                print("重试")
 
+        # 遍历查询结果
         for item in data['query']['categorymembers']:
+            # 将查询结果添加到page_ids列表中
             page_ids.append(item['pageid'])
 
+        # 如果查询结果中有continue字段，则获取continue字段的值
         if 'continue' in data:
+            # 获取continue字段的值
             params['cmcontinue'] = data['continue']['cmcontinue']
         else:
+            # 否则，跳出循环
             break
 
+    # 返回page_ids列表
     return page_ids
 
 
 def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles):
+    '''
+    获取页面内容
+    :param pageid_list: 页面id列表
+    :param api_url: api请求地址
+    :param source: 来源
+    :param cleaning_rule: 去除规则
+    :param exclude_titles: 不需要的标题
+    :return:
+    '''
     params = {'action': 'query', 'format': 'json', 'prop': 'cirrusdoc', 'curtimestamp': 1, 'indexpageids': 1}
     data = []
     for pageidlist_devide in devide_list(pageid_list, 50):
