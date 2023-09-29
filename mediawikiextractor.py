@@ -113,27 +113,15 @@ def get_page_ids(api_url, category):
     return page_ids
 
 
-def get_json_data(json_file_path, search_pageid, search_source):
-    try:
-        # 打开JSON文件并加载数据
-        with open(json_file_path, 'r', encoding='utf-8') as json_file:
-            json_data = json.load(json_file)
+def get_json_data(json_data, search_pageid, search_source):
+    # 遍历JSON数据并查找匹配的pageid及其索引
+    for index, item in enumerate(json_data):
+        if item["pageid"] == search_pageid and item["source"] == search_source:
+            # 找到匹配的pageid，返回字典和索引
+            return item, index
 
-        # 遍历JSON数据并查找匹配的pageid及其索引
-        for index, item in enumerate(json_data):
-            if item["pageid"] == search_pageid and item["source"] == search_source:
-                # 找到匹配的pageid，返回字典和索引
-                return item, index
-
-        # 如果没有找到匹配的pageid，返回None
-        return None, -1
-
-    except FileNotFoundError:
-        print(f"未找到文件: {json_file_path}")
-        return None, -1
-    except json.JSONDecodeError as e:
-        print(f"JSON解析错误: {e}")
-        return None, -1
+    # 如果没有找到匹配的pageid，返回None
+    return None, -1
 
 
 def request_error(message):
@@ -149,6 +137,12 @@ def request_error(message):
         time.sleep(10)  # 否则等待10秒后重试
 
     print("重试")
+
+
+def clear_text(text, cleaning_rule):
+    for pattern in cleaning_rule:
+        text = re.sub(pattern, r"", text, count=0, flags=re.DOTALL)
+    return text
 
 
 def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_url, output_format):
@@ -171,9 +165,12 @@ def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_u
             with open(output_path, 'r', encoding='UTF-8') as json_file:
                 data = json.load(json_file)
             print(f'{output_path} 存在且是有效的JSON文件,读取')
-            for index, item in enumerate(data):
-                if item["pageid"] not in pageid_list or item["source"] != source:
-                    del data[index]
+            new_data = []
+            for item in data:
+                if item["pageid"] in pageid_list and item["source"] == source:
+                    new_data.append(item)
+
+            data = new_data
 
         except json.JSONDecodeError:
             print(f'{output_path} 存在，但不是有效的JSON文件，删除')
@@ -207,16 +204,23 @@ def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_u
             timestamp = rawpagejson['revisions'][0]['timestamp']
             # 获取页面版本
             version = rawpagejson['revisions'][0]['revid']
+            found_match = False  # 初始化标志变量
             # 使用re模块的search函数来查找匹配
             for exclude_title in exclude_titles:
                 match = re.search(exclude_title, title)  # 排除标题
                 # 如果找到匹配，则match对象不为None
                 if match:
+                    found_match = True  # 设置标志为True
                     print(f"排除标题：{title}")
-                    break
+                    for index, item in enumerate(data):
+                        if item["title"] == title and item["source"] == source:
+                            # 搜索排除标题的字典并删除
+                            del data[index]
+            if found_match:
+                continue  # 跳过获取排除标题页面
 
-            if os.path.exists(output_path):  # 检查是否需要更新
-                search_data, search_index = get_json_data(output_path, pageid, source)
+            if len(data) != 0:
+                search_data, search_index = get_json_data(data, pageid, source)
                 if search_data is not None:
                     if title == search_data["title"] and \
                         pageid == search_data["pageid"] and \
@@ -238,6 +242,8 @@ def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_u
                         if not update:  # 如果没有移动到json中的当前位置(末尾)
                             print(f"[标题]{title}\t[页面id]{pageid}\t[最后修改]{timestamp}\t[版本]{version}\t没有变化，跳过请求&处理")
                             result = search_data["text"]
+                            for i in result:
+                                result[i] = clear_text(result[i], cleaning_rule)
                             del data[search_index]
                             data.extend([{"title": title, "pageid": pageid, "version": version, "timestamp": timestamp, "source": source, "text": result}])
                             # 以UTF-8编码格式，将data列表中的数据写入到output_path文件中
@@ -249,7 +255,7 @@ def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_u
                 else:
                     update = False  # 没有此页面的相关数据不更新直接添加
             else:
-                update = False  # 没有已输出的JSON文件
+                update = False  # 没有已输出的数据
 
             params2 = {'curid': pageid}
             while True:
@@ -293,16 +299,16 @@ def process_html(text, cleaning_rule, output_format):
     for div_element in div_elements:
         text = div_element.get_text()  # 获取<div>元素的文本内容
         text_length = len(text)
-        if text_length > max_text_length:
+        if text_length >= max_text_length:
             max_div = div_element
             max_text_length = text_length
     div_element = max_div
-    # 如果找到了<div>元素，则查找并删除所有<table>元素
+    # 如果找到了<div>元素，则查找并删除所有<table>与<div>元素
     if div_element:
         for i in ["navbox", "noprint"]:
-            tables_to_remove = div_element.find_all('table', class_=f"{i}")
-            for table in tables_to_remove:
-                table.extract()  # 从DOM中移除<table>元素
+            elements_to_remove = div_element.find_all(['table', 'div'], class_=f"{i}")
+            for element in elements_to_remove:
+                element.extract()  # 从DOM中移除<table>与<div>元素
 
     # 创建一个HTML2Text对象
     h = html2text.HTML2Text()
@@ -340,8 +346,7 @@ def process_html(text, cleaning_rule, output_format):
             text = h.handle(div_element.prettify())
 
     # 清理文本
-    for pattern in cleaning_rule:
-        text = re.sub(pattern, r"", text, count=0, flags=re.DOTALL)
+    text = clear_text(text, cleaning_rule)
     return text
 
 
