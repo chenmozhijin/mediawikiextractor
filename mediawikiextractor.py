@@ -8,6 +8,7 @@ import sys
 import html2text
 import datetime
 import time
+import os
 
 
 def devide_list(input_list, chunk_size):
@@ -112,6 +113,29 @@ def get_page_ids(api_url, category):
     return page_ids
 
 
+def get_json_data(json_file_path, search_pageid, search_source):
+    try:
+        # 打开JSON文件并加载数据
+        with open(json_file_path, 'r', encoding='utf-8') as json_file:
+            json_data = json.load(json_file)
+
+        # 遍历JSON数据并查找匹配的pageid及其索引
+        for index, item in enumerate(json_data):
+            if item["pageid"] == search_pageid and item["source"] == search_source:
+                # 找到匹配的pageid，返回字典和索引
+                return item, index
+
+        # 如果没有找到匹配的pageid，返回None
+        return None, -1
+
+    except FileNotFoundError:
+        print(f"未找到文件: {json_file_path}")
+        return None, -1
+    except json.JSONDecodeError as e:
+        print(f"JSON解析错误: {e}")
+        return None, -1
+
+
 def request_error(message):
     global error_count
     if not isinstance(error_count, int):
@@ -132,13 +156,29 @@ def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_u
     获取页面内容
     :param pageid_list: 页面id列表
     :param api_url: api请求地址
+    :param site_url: mediawiki网站index.php地址
     :param source: 来源
-    :param cleaning_rule: 去除规则
-    :param exclude_titles: 不需要的标题
+    :param cleaning_rule: 清理规则
+    :param exclude_titles: 不需要的页面的标题
+    :output_format: 输出的格式
     :return:
     '''
     params = {'action': 'query', 'format': 'json', 'prop': 'info|revisions', 'curtimestamp': 1, 'indexpageids': 1}
     data = []
+    if os.path.exists(output_path):
+        try:
+            # 尝试解析JSON文件
+            with open(output_path, 'r', encoding='UTF-8') as json_file:
+                data = json.load(json_file)
+            print(f'{output_path} 存在且是有效的JSON文件,读取')
+            for index, item in enumerate(data):
+                if item["pageid"] not in pageid_list or item["source"] != source:
+                    del data[index]
+
+        except json.JSONDecodeError:
+            print(f'{output_path} 存在，但不是有效的JSON文件，删除')
+            os.remove(output_path)
+
     request_times = 0
     for pageidlist_devide in devide_list(pageid_list, 50):
         param_pageids = '|'.join(map(str, pageidlist_devide))
@@ -174,6 +214,43 @@ def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_u
                 if match:
                     print(f"排除标题：{title}")
                     break
+
+            if os.path.exists(output_path):  # 检查是否需要更新
+                search_data, search_index = get_json_data(output_path, pageid, source)
+                if search_data is not None:
+                    if title == search_data["title"] and \
+                        pageid == search_data["pageid"] and \
+                            version == search_data["version"] and \
+                            timestamp == search_data["timestamp"] and \
+                            source == search_data["source"]:  # 检查基本信息是否变化
+                        if isinstance(output_format, str):  # 检查格式是否为要求的格式
+                            if isinstance(search_data["text"], str):
+                                update = False
+                            else:
+                                update = True  # 无法判断格式-更新
+                        else:
+                            for item in output_format:
+                                if item not in search_data["text"]:
+                                    update = True  # 有更改的格式-更新
+                                else:
+                                    update = False
+
+                        if not update:  # 如果没有移动到json中的当前位置(末尾)
+                            print(f"[标题]{title}\t[页面id]{pageid}\t[最后修改]{timestamp}\t[版本]{version}\t没有变化，跳过请求&处理")
+                            result = search_data["text"]
+                            del data[search_index]
+                            data.extend([{"title": title, "pageid": pageid, "version": version, "timestamp": timestamp, "source": source, "text": result}])
+                            # 以UTF-8编码格式，将data列表中的数据写入到output_path文件中
+                            with open(output_path, 'w', encoding='UTF-8') as output_file:
+                                json.dump(data, output_file, ensure_ascii=False, indent=4)
+                            continue
+                    else:
+                        update = True  # update变量用于定义是否把数据更新到json中的当前位置
+                else:
+                    update = False  # 没有此页面的相关数据不更新直接添加
+            else:
+                update = False  # 没有已输出的JSON文件
+
             params2 = {'curid': pageid}
             while True:
                 try:
@@ -197,6 +274,9 @@ def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_u
                 result = process_html(response.text, cleaning_rule, output_format)
                 # 将title、pageid、version、timestamp、source和result添加到data列表中
 
+            if update:  # 是否数据更新到json中的当前位置(末尾)
+                del data[search_index]
+
             data.extend([{"title": title, "pageid": pageid, "version": version, "timestamp": timestamp, "source": source, "text": result}])
             # 以UTF-8编码格式，将data列表中的数据写入到output_path文件中
             with open(output_path, 'w', encoding='UTF-8') as output_file:
@@ -207,7 +287,16 @@ def process_html(text, cleaning_rule, output_format):
     # 使用Beautiful Soup解析HTML内容
     soup = BeautifulSoup(text, 'html.parser')
     # 查找具有特定类名的<div>元素
-    div_element = soup.find('div', class_='mw-parser-output')
+    div_elements = soup.find_all('div', class_='mw-parser-output')
+    max_div = None
+    max_text_length = 0
+    for div_element in div_elements:
+        text = div_element.get_text()  # 获取<div>元素的文本内容
+        text_length = len(text)
+        if text_length > max_text_length:
+            max_div = div_element
+            max_text_length = text_length
+    div_element = max_div
     # 如果找到了<div>元素，则查找并删除所有<table>元素
     if div_element:
         for i in ["navbox", "noprint"]:
