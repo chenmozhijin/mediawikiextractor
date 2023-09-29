@@ -127,3 +127,4 @@ dmypy.json
 data.json
 .vscode/
 config-tset.json
+config-test.json
