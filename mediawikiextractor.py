@@ -40,6 +40,7 @@ def get_config():
         cleaning_rule = config_data.get("cleaning_rule")
         exclude_titles = config_data.get("exclude_titles")
         site_url = config_data.get("site_url")
+        format = config_data.get("format")
     except FileNotFoundError:
         print(f"配置文件 '{config_path}' 未找到")
         sys.exit(1)
@@ -49,8 +50,17 @@ def get_config():
     except BaseException:
         print(f"读取配置文件 '{config_path}' 时出现未知错误")
         sys.exit(1)
+    if isinstance(format, str):
+        if format.lower() not in ["plain", "markdown", "markdown with links"]:
+            print("format的值无效")
+            sys.exit(1)
+    else:
+        for item in format:
+            if item.lower() not in ["plain", "markdown", "markdown with links"]:
+                print("format的值无效")
+                sys.exit(1)
 
-    return pageid_list, api_url, source, categories, exclude_ids, exclude_categories, cleaning_rule, exclude_titles, site_url
+    return pageid_list, api_url, source, categories, exclude_ids, exclude_categories, cleaning_rule, exclude_titles, site_url, format
 
 
 def get_page_ids(api_url, category):
@@ -102,7 +112,22 @@ def get_page_ids(api_url, category):
     return page_ids
 
 
-def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_url):
+def request_error(message):
+    global error_count
+    if not isinstance(error_count, int):
+        error_count = 0
+    error_count += 1
+    if error_count % 10 == 0:
+        print(f"[error] {message}, 错误次数: {error_count}，等待10分钟后重试")
+        time.sleep(600)  # 如果错误次数为10的倍数，等待10分钟（600秒）
+    else:
+        print(f"[error] {message}, 错误次数: {error_count}，等待10秒后重试")
+        time.sleep(10)  # 否则等待10秒后重试
+
+    print("重试")
+
+
+def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_url, format):
     '''
     获取页面内容
     :param pageid_list: 页面id列表
@@ -124,10 +149,7 @@ def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_u
                 requests_return = requests.get(api_url, params=params1, timeout=(10, 30))
                 request_times = request_times + 1
             except BaseException as e:
-                print(f"[error]请求获取页面信息失败，正在重试。请求的api:{api_url}，请求的参数{params1}，错误:{e},十秒后重试")
-                # 等待10秒
-                time.sleep(10)
-                print("重试")
+                request_error(f"请求获取页面信息失败。请求的api:{api_url}，请求的参数{params1}，错误:{e}")
             else:
                 if requests_return.ok:
                     requests_return: dict = requests_return.json()
@@ -159,21 +181,29 @@ def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_u
                     response = requests.get(site_url, params=params2, timeout=100)
                     request_times = request_times + 1
                 except BaseException as e:
-                    print(f"[error]请求获取页面失败，正在重试。请求的url:{api_url}，请求的参数{params2}，错误:{e},十秒后重试")
-                    # 等待10秒
-                    time.sleep(10)
-                    print("重试")
+                    request_error(f"请求获取页面失败。请求的url:{api_url}，请求的参数{params2}，错误:{e}")
                 else:
-                    print(f"当前请求&处理:[标题]{title}[页面id]{pageid}[最后修改]{timestamp}[版本]{version}[请求次数]{request_times}")
+                    print(f"当前请求&处理:[标题]{title}\t[页面id]{pageid}\t[最后修改]{timestamp}\t[版本]{version}\t[请求次数]{request_times}")
                     break
+            if isinstance(format, list):
+                # 创建一个空字典，用于存储处理后的结果
+                result = {}
+                # 遍历format列表中的每一项
+                for format_item in format:
+                    # 调用process_html函数，处理response，并将结果存储到result字典中
+                    result[format_item] = process_html(response.text, cleaning_rule, format_item)
+            else:
+                # 调用process_html函数，处理response，并将结果存储到result中
+                result = process_html(response.text, cleaning_rule, format)
+                # 将title、pageid、version、timestamp、source和result添加到data列表中
 
-            result = process_html(response.text, cleaning_rule)
             data.extend([{"title": title, "pageid": pageid, "version": version, "timestamp": timestamp, "source": source, "text": result}])
+            # 以UTF-8编码格式，将data列表中的数据写入到output_path文件中
             with open(output_path, 'w', encoding='UTF-8') as output_file:
                 json.dump(data, output_file, ensure_ascii=False, indent=4)
 
 
-def process_html(text, cleaning_rule):
+def process_html(text, cleaning_rule, format):
     # 使用Beautiful Soup解析HTML内容
     soup = BeautifulSoup(text, 'html.parser')
     # 查找具有特定类名的<div>元素
@@ -185,16 +215,42 @@ def process_html(text, cleaning_rule):
             for table in tables_to_remove:
                 table.extract()  # 从DOM中移除<table>元素
 
+    # 创建一个HTML2Text对象
     h = html2text.HTML2Text()
-    # Ignore converting links from HTML
-    h.ignore_links = True
-    h.ignore_images = True
-    # h.ignore_tables = True
-    h.ignore_emphasis = True
-    Markdown = h.handle(div_element.prettify())
-    html = markdown(Markdown)
-    text = ''.join(BeautifulSoup(html, features="lxml").findAll(string=True))
-    # 自定义清理
+    # 根据格式忽略转换部分内容
+
+    match format:
+        case "plain":
+            # 忽略转换链接
+            h.ignore_links = True
+            # 忽略转换图片
+            h.ignore_images = True
+            # 忽略转换表格
+            h.ignore_tables = True
+            # 忽略转换强调符号
+            h.ignore_emphasis = True
+            # 将div_element转换为Markdown格式
+            Markdown = h.handle(div_element.prettify())
+            # 将Markdown格式转换为html格式
+            html = markdown(Markdown)
+            # 将html格式转换为文本格式
+            text = ''.join(BeautifulSoup(html, features="lxml").findAll(string=True))
+        case "markdown":
+            # 忽略转换链接
+            h.ignore_links = True
+            # 忽略转换图片
+            h.ignore_images = True
+            # 将div_element转换为Markdown格式
+            text = h.handle(div_element.prettify())
+        case "markdown with links":
+            # 不忽略转换链接
+            h.ignore_links = False
+            # 不忽略转换图片
+            h.ignore_images = False
+            # 将div_element转换为Markdown格式
+            text = h.handle(div_element.prettify())
+
+    # 清理文本
     for pattern in cleaning_rule:
         text = re.sub(pattern, r"", text, count=0, flags=re.DOTALL)
     return text
@@ -206,7 +262,7 @@ def main():
     '''
     current_time = datetime.datetime.now()
     print("mediawikiextractor\n运行开始于：", current_time)
-    pageid_list, api_url, source, categories, exclude_ids, exclude_categories, cleaning_rule, exclude_titles, site_url = get_config()
+    pageid_list, api_url, source, categories, exclude_ids, exclude_categories, cleaning_rule, exclude_titles, site_url, format = get_config()
     if categories:
         for category in categories:
             print(f"正在获取分类{category}中的所有页面id")
@@ -236,9 +292,10 @@ def main():
         print("没有需要处理的页面id，程序结束")
         sys.exit(1)
     pageid_list = sorted(list(set(pageid_list)))
-    get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_url)
+    get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_url, format)
 
 
+error_count = 0
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('--config', required=True, help='Path to config file')
