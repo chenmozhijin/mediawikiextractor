@@ -40,7 +40,7 @@ def get_config():
         cleaning_rule = config_data.get("cleaning_rule")
         exclude_titles = config_data.get("exclude_titles")
         site_url = config_data.get("site_url")
-        format = config_data.get("format")
+        output_format = config_data.get("output_format")
     except FileNotFoundError:
         print(f"配置文件 '{config_path}' 未找到")
         sys.exit(1)
@@ -50,17 +50,17 @@ def get_config():
     except BaseException:
         print(f"读取配置文件 '{config_path}' 时出现未知错误")
         sys.exit(1)
-    if isinstance(format, str):
-        if format.lower() not in ["plain", "markdown", "markdown with links"]:
-            print("format的值无效")
+    if isinstance(output_format, str):
+        if output_format.lower() not in ["plain", "markdown", "markdown with links"]:
+            print("output_format的值无效")
             sys.exit(1)
     else:
-        for item in format:
+        for item in output_format:
             if item.lower() not in ["plain", "markdown", "markdown with links"]:
-                print("format的值无效")
+                print("output_format的值无效")
                 sys.exit(1)
 
-    return pageid_list, api_url, source, categories, exclude_ids, exclude_categories, cleaning_rule, exclude_titles, site_url, format
+    return pageid_list, api_url, source, categories, exclude_ids, exclude_categories, cleaning_rule, exclude_titles, site_url, output_format
 
 
 def get_page_ids(api_url, category):
@@ -127,7 +127,7 @@ def request_error(message):
     print("重试")
 
 
-def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_url, format):
+def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_url, output_format):
     '''
     获取页面内容
     :param pageid_list: 页面id列表
@@ -185,16 +185,16 @@ def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_u
                 else:
                     print(f"当前请求&处理:[标题]{title}\t[页面id]{pageid}\t[最后修改]{timestamp}\t[版本]{version}\t[请求次数]{request_times}")
                     break
-            if isinstance(format, list):
+            if isinstance(output_format, list):
                 # 创建一个空字典，用于存储处理后的结果
                 result = {}
-                # 遍历format列表中的每一项
-                for format_item in format:
+                # 遍历output_format列表中的每一项
+                for output_format_item in output_format:
                     # 调用process_html函数，处理response，并将结果存储到result字典中
-                    result[format_item] = process_html(response.text, cleaning_rule, format_item)
+                    result[output_format_item] = process_html(response.text, cleaning_rule, output_format_item)
             else:
                 # 调用process_html函数，处理response，并将结果存储到result中
-                result = process_html(response.text, cleaning_rule, format)
+                result = process_html(response.text, cleaning_rule, output_format)
                 # 将title、pageid、version、timestamp、source和result添加到data列表中
 
             data.extend([{"title": title, "pageid": pageid, "version": version, "timestamp": timestamp, "source": source, "text": result}])
@@ -203,7 +203,7 @@ def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_u
                 json.dump(data, output_file, ensure_ascii=False, indent=4)
 
 
-def process_html(text, cleaning_rule, format):
+def process_html(text, cleaning_rule, output_format):
     # 使用Beautiful Soup解析HTML内容
     soup = BeautifulSoup(text, 'html.parser')
     # 查找具有特定类名的<div>元素
@@ -219,7 +219,7 @@ def process_html(text, cleaning_rule, format):
     h = html2text.HTML2Text()
     # 根据格式忽略转换部分内容
 
-    match format:
+    match output_format:
         case "plain":
             # 忽略转换链接
             h.ignore_links = True
@@ -262,7 +262,7 @@ def main():
     '''
     current_time = datetime.datetime.now()
     print("mediawikiextractor\n运行开始于：", current_time)
-    pageid_list, api_url, source, categories, exclude_ids, exclude_categories, cleaning_rule, exclude_titles, site_url, format = get_config()
+    pageid_list, api_url, source, categories, exclude_ids, exclude_categories, cleaning_rule, exclude_titles, site_url, output_format = get_config()
     if categories:
         for category in categories:
             print(f"正在获取分类{category}中的所有页面id")
@@ -292,7 +292,7 @@ def main():
         print("没有需要处理的页面id，程序结束")
         sys.exit(1)
     pageid_list = sorted(list(set(pageid_list)))
-    get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_url, format)
+    get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_url, output_format)
 
 
 error_count = 0
