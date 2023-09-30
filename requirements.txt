@@ -1,6 +1,5 @@
 regex
 requests
-opencc
 html2text
 markdown
 bs4

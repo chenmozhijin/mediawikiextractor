@@ -240,7 +240,7 @@ def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_u
                                     update = False
 
                         if not update:  # 如果没有移动到json中的当前位置(末尾)
-                            print(f"[标题]{title}\t[页面id]{pageid}\t[最后修改]{timestamp}\t[版本]{version}\t没有变化，跳过请求&处理")
+                            print(f"[标题]{title}\t[页面id]{pageid}\t[最后修改]{timestamp}\t[版本]{version}\t没有变化，重新清理文本后跳过请求&处理")
                             result = search_data["text"]
                             for i in result:
                                 result[i] = clear_text(result[i], cleaning_rule)
@@ -305,15 +305,20 @@ def process_html(text, cleaning_rule, output_format):
     div_element = max_div
     # 如果找到了<div>元素，则查找并删除所有<table>与<div>元素
     if div_element:
-        for i in ["navbox", "noprint"]:
-            elements_to_remove = div_element.find_all(['table', 'div'], class_=f"{i}")
-            for element in elements_to_remove:
-                element.extract()  # 从DOM中移除<table>与<div>元素
+        elements_to_remove = []
+        for i in ["navbox", "noprint"]:  # 去除导航模板
+            elements_to_remove += div_element.find_all(['table', 'div'], class_=f"{i}")
+        elements_to_remove += div_element.find_all('span', class_="textToggleDisplay hidden textToggleDisplay-off")
+        if output_format != "markdown with links":
+            elements_to_remove += div_element.find_all('li', class_="gallerybox")
+            elements_to_remove += div_element.find_all(['td', 'tr'], class_="infobox-image-container")
+            elements_to_remove += div_element.find_all('div', class_="thumbinner")
+        for element in elements_to_remove:
+            element.extract()  # 从DOM中移除<table>与<div>元素
 
     # 创建一个HTML2Text对象
     h = html2text.HTML2Text()
     # 根据格式忽略转换部分内容
-
     match output_format:
         case "plain":
             # 忽略转换链接
