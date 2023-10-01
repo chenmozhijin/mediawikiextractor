@@ -167,7 +167,7 @@ def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_u
             print(f'{output_path} 存在且是有效的JSON文件,读取')
             new_data = []
             for item in data:
-                if int(item["pageid"]) in pageid_list and item["source"] == source:
+                if item["pageid"] in pageid_list and item["source"] == source:
                     new_data.append(item)
 
             data = new_data
