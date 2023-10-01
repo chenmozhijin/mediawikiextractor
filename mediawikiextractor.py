@@ -167,13 +167,13 @@ def get_page(pageid_list, api_url, source, cleaning_rule, exclude_titles, site_u
             print(f'{output_path} 存在且是有效的JSON文件,读取')
             new_data = []
             for item in data:
-                if item["pageid"] in pageid_list and item["source"] == source:
+                if int(item["pageid"]) in pageid_list and item["source"] == source:
                     new_data.append(item)
 
             data = new_data
 
-        except json.JSONDecodeError:
-            print(f'{output_path} 存在，但不是有效的JSON文件，删除')
+        except json.JSONDecodeError as e:
+            print(f'{output_path} 存在，但不是有效的JSON文件，删除。错误：P{e}')
             os.remove(output_path)
 
     request_times = 0
