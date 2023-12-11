@@ -187,7 +187,7 @@ def get_page(config: dict):
 
 def table_fix(input_text: str, cell_newline: str):
     return_text = input_text
-    pattern = re.compile(r'\|[^\|\n]*\n+---\s*(?:(?:\n[^\|\n]*\|.*)+(?:(?:\n.+){1,10}\n{0,1}){0,1}(?:\n[^\|\n]*\|.*)+)+')
+    pattern = re.compile(r'\|[^\|\n]*\n+---\s*(?:(?:\n[^\|\n]*\|.*)*(?:(?:\n.+){1,10}\n{0,1}){0,1}(?:\n[^\|\n]*\|.*)+)+')
     tables_to_process = pattern.findall(input_text)
     for table_to_process in tables_to_process:
         original_table = table_to_process
