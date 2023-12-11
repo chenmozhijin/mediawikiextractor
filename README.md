@@ -41,6 +41,8 @@ python mediawikiextractor.py --config config.json --output data.json
         "source": "moegril",
         "site_url": "https://zh.moegirl.org.cn/index.php",
         "api": "https://zh.moegirl.org/api.php",
+        "table_fix": true,
+        "cell_newline": "<br>",
         "output_format": ["plain","markdown"],
         "page_ids": [19765,275042,104819,205103,215911,291578,414748,546166,322316,343884,286448,385770,33291,8639,556824,297456,20490,31450,33234,35578,153449,33227,255209,574022,374048,28845,308168],
         "categories": ["恋爱冒险游戏", "视觉小说","Galgame公司","宅文化术语","萌宅用语","Little_Busters!","AIR","Angel_Beats","CLANNAD","Charlotte","Harmonia(Key)#","Kanon","LOOPERS","MOON.","LUNARiA_-Virtualized_Moonchild-","ONE～辉之季节～","Rewrite","Summer_Pockets","星之梦","星之终途","ATRI","爱上火车","初音岛","9-nine-","常轨脱离Creative","住在拔作岛上的贫乳应该如何是好？","苍之彼方的四重奏","美少女万华镜","缘之空","灰色系列","少女领域","千恋万花","FORTUNE ARTERIAL","柚子社作品","Palette作品","Smile作品","Recette作品","BUG SYSTEM作品","SWEET&TEA作品","猫猫社作品","YAMAYURI GAMES作品","Navel作品","Navel honeybell作品","AUGUST作品","Whirlpool作品","戏画作品"],
@@ -61,7 +63,9 @@ python mediawikiextractor.py --config config.json --output data.json
 | `source`                        | 数据来源，输出文件中的每个页面字典中都将包含此元素。
 | `site_url`                      | 网站的index.php地址，如：`https://ja.wikipedia.org/w/index.php`。用于获取获取页面内容。
 | `api`                           | 网站的api地址，如：`https://ja.wikipedia.org/w/api.php`。用于获取获取页面基本信息。
-| `output_format`                 | 输出文本格式，目前支持：`plain`(纯文本)、`markdown`(不包含任何链接)、`markdown with links`(包含链接包括图片链接)。值可以为字符串或列表。
+| `table_fix`                     | 是否修复html2text无法正常转换的表格，布尔值。
+| `cell_newline`                  | 修复表格时单元格内换行使用的分隔符，字符串。
+| `output_format`                 | 输出文本格式的列表，目前支持：`plain`(纯文本)、`markdown`(不包含任何链接)、`markdown with links`(包含链接包括图片链接)。
 | `page_ids`                      | 需要爬取的页面id列表。
 | `categories`                    | 需要爬取的分类列表。
 | `exclude_ids`                   | 需要排除的页面id列表。
