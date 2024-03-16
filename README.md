@@ -60,7 +60,7 @@ python mediawikiextractor.py --config config.json --output data.json
 |---------------------------------|---------------------------------------------------
 | `name`                          | 网站名称，脚本不会读取。
 | `source`                        | 数据来源，输出文件中的每个页面字典中都将包含此元素。
-| `site_domain`                   | 网站的域名
+| `index_url`                      | 网站的index.php地址，如：`https://ja.wikipedia.org/w/index.php`。用于获取获取页面内容。
 | `excludeExistingPages`          | 是否排除已存在的页面，布尔值。
 | `table_fix`                     | 是否修复html2text无法正常转换的表格，布尔值。
 | `cell_newline`                  | 修复表格时单元格内换行使用的分隔符，字符串。

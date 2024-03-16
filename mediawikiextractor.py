@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 import time
+from urllib.parse import urlparse
 
 import html2text
 import regex as re
@@ -34,7 +35,7 @@ def load_config(config_path: str) -> dict:
     if not isinstance(config, dict):
         logging.exception("配置文件格式错误")
 
-    for content_type, keys in {str: ["source", "site_domain"],
+    for content_type, keys in {str: ["source", "index_url"],
                                bool: ["table_fix", "excludeExistingPages"],
                                list: ["output_format", "page_titles", "categories", "exclude_categories", "exclude_titles", "cleaning_rule"]}.items():
         for key in keys:
@@ -77,7 +78,9 @@ def process_category(config: dict) -> list[str]:
     """
     page_titles: list[str] = []
     categories: list[str] = config["categories"]
-    index_url = "https://" + config["site_domain"] + "/index.php"
+    index_url = config["index_url"]
+    parsed_url = urlparse(index_url)
+    site_domain = parsed_url.netloc
     for i, category in enumerate(categories):
         nextpage_url = None
         while True:
@@ -100,7 +103,7 @@ def process_category(config: dict) -> list[str]:
             for a in soup.find_all("a"):
                 if (a.attrs.get("title") == f"Category:{category}"
                         and "pagefrom" in a.attrs.get("href", "")):
-                    nextpage_url = f"https://{config['site_domain']}{a['href']}"
+                    nextpage_url = f"https://{site_domain}{a['href']}"
                     break
             if nextpage_url is None:
                 success = True
@@ -111,12 +114,7 @@ def process_category(config: dict) -> list[str]:
     return page_titles
 
 
-def get_page_html(site_domain: str, title: str) -> str | int:
-    index_url = "https://" + site_domain + "/index.php"
-    return request_page(index_url, {"title": title})
-
-
-def get_info(html: str, site_domain: str, title: str) -> dict:
+def get_info(html: str, index_url: str, title: str) -> dict:
     info = {"pageid": None, "revision_id": None}
     get_info_pattern = re.compile(r"<!-- Saved in parser cache with key .*?idhash:(\d+)-.*?revision id (\d+).*\n -->")
     find_results = re.findall(get_info_pattern, html)
@@ -135,7 +133,6 @@ def get_info(html: str, site_domain: str, title: str) -> dict:
                     break
 
     if info == {"pageid": None, "revision_id": None}:
-        index_url = "https://" + site_domain + "/index.php"
         index_html = request_page(index_url, {"title": title, "action": 'info'})
         soup = BeautifulSoup(index_html, "html.parser")
         mw_pageinfo_article_id = soup.find('tr', {'id': 'mw-pageinfo-article-id'})
@@ -163,7 +160,7 @@ def get_categories(html: str) -> list:
         catlinks = None
         for script in scripts:
             if script.string and '"catlinks":' in script.string:
-                catlinks = re.findall(r'("catlinks":"[^,]*?",)', script.string)
+                catlinks = re.findall(r'("catlinks":".*?",)', script.string)
                 if catlinks:
                     try:  # noqa: SIM105
                         catlinks = json.loads("{" + catlinks[0][:-1] + "}")
@@ -323,12 +320,9 @@ def main(args: argparse.Namespace) -> int:
         with open(output_path, encoding="utf-8") as output_file:
             try:
                 data: list[dict] = json.load(output_file)
-                original_titles = [item["title"] for item in data]
             except Exception:
-                original_titles = []
                 data: list[dict] = []
     else:
-        original_titles = []
         data: list[dict] = []
 
     for i, page_title in enumerate(page_titles):
@@ -336,10 +330,11 @@ def main(args: argparse.Namespace) -> int:
 
         page_dict = {"title": page_title, "source": config["source"]}
 
-        if config["excludeExistingPages"] and page_title in original_titles:
+        same_title_item = [item for item in data if item["title"] == page_title and item["source"] == config["source"]]
+        if config["excludeExistingPages"] and same_title_item:
             continue
 
-        page_html = get_page_html(config["site_domain"], page_title)
+        page_html = request_page(config["index_url"], {"title": page_title})
         if page_html == 404:
             logging.warning(f"页面 {page_title} 不存在")
             continue
@@ -352,12 +347,14 @@ def main(args: argparse.Namespace) -> int:
                 logging.info(f"页面 {page_title} 位于排除的分类 {page_category} 下，跳过")
                 continue
 
-        page_dict.update(get_info(page_html, config["site_domain"], page_title))
+        page_dict.update(get_info(page_html, config["index_url"], page_title))
 
         page_dict["data"] = {}
         for output_format in config["output_format"]:
             page_dict["data"][output_format] = process_html(page_html, config, output_format)
 
+        if same_title_item:
+            data.remove(same_title_item[0])
         data.append(page_dict)
         with open(output_path, 'w', encoding="utf-8") as output_file:
             json.dump(data, output_file, ensure_ascii=False, indent=4)
