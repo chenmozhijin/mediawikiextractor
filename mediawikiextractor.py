@@ -1,191 +1,189 @@
-import regex as re
-from bs4 import BeautifulSoup
-from markdown import markdown
-import json
+from __future__ import annotations
+
 import argparse
-import requests
-import html2text
-import datetime
-import time
+import json
+import logging
 import os
+import sys
+import time
+
+import html2text
+import regex as re
+import requests
+from bs4 import BeautifulSoup
+from markdown import markdown as markdown2html
+
+headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+           "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 "
+           "Safari/537.36 Edg/120.0.0.0"}
 
 
-def devide_list(input_list, chunk_size):
+def load_config(config_path: str) -> dict:
     """
-    将列表拆分为指定长度的子列表。
-
-    参数：
-    input_list: 要拆分的列表。
-    chunk_size: 子列表的长度。
-
-    返回值：
-    包含子列表的列表。
+    加载配置文件
+    :param config_path: 配置文件路径
+    :return: 配置文件内容
     """
-    if chunk_size <= 0:
-        raise ValueError("chunk_size必须大于0")
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            config = json.load(f)
+    except FileNotFoundError:
+        logging.exception("配置文件不存在")
+    except json.JSONDecodeError:
+        logging.exception("配置文件格式错误")
+    if not isinstance(config, dict):
+        logging.exception("配置文件格式错误")
 
-    return [input_list[i:i + chunk_size] for i in range(0, len(input_list), chunk_size)]
+    for content_type, keys in {str: ["source", "site_domain"],
+                               bool: ["table_fix", "excludeExistingPages"],
+                               list: ["output_format", "page_titles", "categories", "exclude_categories", "exclude_titles", "cleaning_rule"]}.items():
+        for key in keys:
+            if key not in config or not isinstance(config[key], content_type):
+                logging.error(f"配置文件格式错误，关键字：{key}缺失或类型错误")
 
-
-def get_json_data(json_data, search_pageid, search_source):
-    # 遍历JSON数据并查找匹配的pageid及其索引
-    for index, item in enumerate(json_data):
-        if item["pageid"] == search_pageid and item["source"] == search_source:
-            # 找到匹配的pageid，返回字典和索引
-            return item, index
-
-    # 如果没有找到匹配的pageid，返回None
-    return None, -1
-
-
-def request_error(message):
-    global error_count
-    if not isinstance(error_count, int):
-        error_count = 0
-    error_count += 1
-    if error_count % 10 == 0:
-        print(f"[error] {message}, 错误次数: {error_count}，等待10分钟后重试")
-        time.sleep(600)  # 如果错误次数为10的倍数，等待10分钟（600秒）
-    else:
-        print(f"[error] {message}, 错误次数: {error_count}，等待10秒后重试")
-        time.sleep(10)  # 否则等待10秒后重试
-
-    print("重试")
+    if config["table_fix"] is True and ("cell_newline" not in config or not isinstance(config["cell_newline"], str)):
+        logging.error("配置文件错误，table_fix启用时cell_newline必须为字符串")
+    return config
 
 
-def clear_text(text, cleaning_rule):
-    for pattern in cleaning_rule:
-        text = re.sub(pattern, "", text, count=0, flags=re.DOTALL)
-    return text
-
-
-def get_page(config: dict):
-    '''
-    获取页面内容
-    :param config 配置
-    :return:
-    '''
-    def isexclude_title(title: str, exclude_titles: list):
-        for exclude_title in exclude_titles:
-            if re.fullmatch(exclude_title, title):
-                return True
-        return False
-
-    params = {'action': 'query', 'format': 'json', 'prop': 'info|revisions', 'curtimestamp': 1, 'indexpageids': 1}
-    data = []
-
-    # 检查是否有旧数据
-    if os.path.exists(output_path):
+def request_page(url: str, params: dict | None = None) -> str | int:
+    if params is None:
+        params = {}
+    while True:
         try:
-            # 尝试解析JSON文件
-            with open(output_path, 'r', encoding='UTF-8') as json_file:
-                old_data = json.load(json_file)
-            print(f'{output_path} 存在且是有效的JSON文件,读取')
-            for item in old_data:
-                if item["pageid"] in config["page_ids"] and item["source"] == config["source"] and not isexclude_title(item["title"], config["exclude_titles"]):
-                    data.append(item)
+            response = requests.get(url, params=params, headers=headers, timeout=10)
+            if response.status_code == 429:
+                logging.warning("请求过于频繁，等待10秒后重试")
+                time.sleep(10)
+                continue
+            if response.status_code == 404:
+                return 404
+            response.raise_for_status()
+        except requests.exceptions.Timeout:
+            logging.warning("请求超时，等待5秒后重试")
+            time.sleep(5)
+        except requests.exceptions.RequestException:
+            logging.warning("请求异常，等待5秒后重试")
+            time.sleep(5)
+        else:
+            return response.text
 
-        except json.JSONDecodeError as e:
-            print(f'{output_path} 存在，但不是有效的JSON文件，删除。错误：P{e}')
-            os.remove(output_path)
 
-    request_times = 0
-    for pageidlist_devide in devide_list(config["page_ids"], 50):
-
-        # 请求页面基本信息
-        param_pageids = '|'.join(map(str, pageidlist_devide))
-        params1 = {**params, **{'pageids': param_pageids}}
+def process_category(config: dict) -> list[str]:
+    """
+    处理分类
+    :param categories: 分类列表
+    :return: 处理后的页面url列表
+    """
+    page_titles: list[str] = []
+    categories: list[str] = config["categories"]
+    index_url = "https://" + config["site_domain"] + "/index.php"
+    for i, category in enumerate(categories):
+        nextpage_url = None
         while True:
-            try:
-                # 发送GET请求获取页面内容
-                requests_return = requests.get(config["api"], params=params1, timeout=(10, 30))
-                request_times = request_times + 1
-            except BaseException as e:
-                request_error(f"请求获取页面信息失败。请求的api:{config['api']}，请求的参数{params1}，错误:{e}")
+            if nextpage_url is None:
+                page_html = request_page(index_url, {"title": f"Category:{category}"})
             else:
-                if requests_return.ok:
-                    requests_return: dict = requests_return.json()
-                    if 'batchcomplete' in requests_return:
-                        print(f"第{request_times}次请求，请求页面信息数量:{len(pageidlist_devide)}个。")
-                        break
-                    else:
-                        print("[error]响应不完整，可能因请求页面数据量过大而导致。请尝试调整请求的数据量。")
-
-        for pageid in pageidlist_devide:
-            # 获取页面json
-            rawpagejson = requests_return['query']['pages'][str(pageid)]
-            # 获取页面标题
-            title = rawpagejson['title']
-            # 获取页面更新时间
-            timestamp = rawpagejson['revisions'][0]['timestamp']
-            # 获取页面版本
-            version = rawpagejson['revisions'][0]['revid']
-
-            if isexclude_title(title, config["exclude_titles"]):
-                print(f"排除标题：{title}")
-                continue  # 跳过获取排除标题页面
-
-            if len(data) != 0:
-                search_data, search_index = get_json_data(data, pageid, config["source"])
-                if search_data is not None:
-                    if title == search_data["title"] and \
-                        pageid == search_data["pageid"] and \
-                            version == search_data["version"] and \
-                            timestamp == search_data["timestamp"] and \
-                            config["source"] == search_data["source"]:  # 检查基本信息是否变化
-                        for item in config["output_format"]:
-                            if item not in search_data["text"]:
-                                update = True  # 有更改的格式-更新
-                            else:
-                                update = False
-
-                        if not update:  # 如果没有移动到json中的当前位置(末尾)
-                            print(f"[标题]{title}\t[页面id]{pageid}\t[最后修改]{timestamp}\t[版本]{version}\t没有变化，重新清理文本后跳过请求&处理")
-                            result = search_data["text"]
-                            for i in result:
-                                result[i] = clear_text(result[i], config["cleaning_rule"])
-                            del data[search_index]
-                            data.extend([{"title": title, "pageid": pageid, "version": version, "timestamp": timestamp, "source": config["source"], "text": result}])
-                            # 以UTF-8编码格式，将data列表中的数据写入到output_path文件中
-                            with open(output_path, 'w', encoding='UTF-8') as output_file:
-                                json.dump(data, output_file, ensure_ascii=False, indent=4)
-                            continue
-                    else:
-                        update = True  # update变量用于定义是否把数据更新到json中的当前位置
-                else:
-                    update = False  # 没有此页面的相关数据不更新直接添加
-            else:
-                update = False  # 没有已输出的数据
-
-            params2 = {'curid': pageid}
-            while True:
-                try:
-                    # 发送GET请求获取页面内容
-                    response = requests.get(config["site_url"], params=params2, timeout=100)
-                    request_times += 1
-                except BaseException as e:
-                    request_error(f"请求获取页面失败。请求的url:{config['site_url']}，请求的参数{params2}，错误:{e}")
-                else:
-                    print(f"当前请求&处理:[标题]{title}\t[页面id]{pageid}\t[最后修改]{timestamp}\t[版本]{version}\t[请求次数]{request_times}")
+                page_html = request_page(nextpage_url)
+            if page_html == 404:
+                logging.error(f"未找到 {category} 分类")
+                success = False
+                break
+            soup = BeautifulSoup(page_html, "lxml")
+            nextpage_url = None
+            mw_category = soup.find("div", "mw-category")
+            if mw_category:
+                for li in mw_category.find_all("li"):
+                    a = li.find("a")
+                    if a and "title" in a.attrs:
+                        page_titles.append(a.attrs["title"])
+            for a in soup.find_all("a"):
+                if (a.attrs.get("title") == f"Category:{category}"
+                        and "pagefrom" in a.attrs.get("href", "")):
+                    nextpage_url = f"https://{config['site_domain']}{a['href']}"
                     break
-            if isinstance(config["output_format"], list):
-                # 创建一个空字典，用于存储处理后的结果
-                result = {}
-                # 遍历output_format列表中的每一项
-                for output_format_item in config["output_format"]:
-                    # 调用process_html函数，处理response，并将结果存储到result字典中
-                    result[output_format_item] = process_html(response.text, config, output_format_item)
+            if nextpage_url is None:
+                success = True
+                break
+        if success:
+            logging.info(f"[{i + 1}/{len(categories)}]获取 {category} 分类的页面列表成功")
 
-            if update:  # 是否数据更新到json中的当前位置(末尾)
-                del data[search_index]  # 删除原数据
-
-            data.extend([{"title": title, "pageid": pageid, "version": version, "timestamp": timestamp, "source": config["source"], "text": result}])
-            # 以UTF-8编码格式，将data列表中的数据写入到output_path文件中
-            with open(output_path, 'w', encoding='UTF-8') as output_file:
-                json.dump(data, output_file, ensure_ascii=False, indent=4)
+    return page_titles
 
 
-def table_fix(input_text: str, cell_newline: str):
+def get_page_html(site_domain: str, title: str) -> str | int:
+    index_url = "https://" + site_domain + "/index.php"
+    return request_page(index_url, {"title": title})
+
+
+def get_info(html: str, site_domain: str, title: str) -> dict:
+    info = {"pageid": None, "revision_id": None}
+    get_info_pattern = re.compile(r"<!-- Saved in parser cache with key .*?idhash:(\d+)-.*?revision id (\d+).*\n -->")
+    find_results = re.findall(get_info_pattern, html)
+    if find_results:
+        info = {"pageid": int(find_results[0][0]), "revision_id": int(find_results[0][1])}
+
+    soup = BeautifulSoup(html, "html.parser")
+    if info == {"pageid": None, "revision_id": None}:
+        scripts = soup.find_all("script")
+        for script in scripts:
+            if script.string and '"wgArticleId":' in script.string and '"wgRevisionId":' in script.string:
+                pageid = re.findall(r'"wgArticleId":(\d+),', script.string)
+                revid = re.findall(r'"wgRevisionId":(\d+),', script.string)
+                if pageid and revid:
+                    info = {"pageid": int(pageid[0]), "revision_id": int(revid[0])}
+                    break
+
+    if info == {"pageid": None, "revision_id": None}:
+        index_url = "https://" + site_domain + "/index.php"
+        index_html = request_page(index_url, {"title": title, "action": 'info'})
+        soup = BeautifulSoup(index_html, "html.parser")
+        mw_pageinfo_article_id = soup.find('tr', {'id': 'mw-pageinfo-article-id'})
+        if mw_pageinfo_article_id:
+            for td in mw_pageinfo_article_id.find_all('td'):
+                if td.string and td.string.isdigit():
+                    info.update({"pageid": int(td.string)})
+                    break
+        mw_pageinfo_lasttime = soup.find('tr', {'id': 'mw-pageinfo-lasttime'})
+        if mw_pageinfo_lasttime:
+            for a in mw_pageinfo_lasttime.find_all('a'):
+                if "oldid=" in a.attrs.get('href', ""):
+                    info.update({"revision_id": int(a.attrs['href'].split("oldid=")[1])})
+
+    return info
+
+
+def get_categories(html: str) -> list:
+    soup = BeautifulSoup(html, "html.parser")
+    mw_normal_catlinks = soup.find("div", {"class": "mw-normal-catlinks"})
+    if mw_normal_catlinks:
+        normal_catlinks = [a.attrs["title"] for a in mw_normal_catlinks.find_all("a")]
+    else:
+        scripts = soup.find_all("script")
+        catlinks = None
+        for script in scripts:
+            if script.string and '"catlinks":' in script.string:
+                catlinks = re.findall(r'("catlinks":"[^,]*?",)', script.string)
+                if catlinks:
+                    try:  # noqa: SIM105
+                        catlinks = json.loads("{" + catlinks[0][:-1] + "}")
+                    except json.JSONDecodeError:
+                        pass
+                    break
+        if not catlinks:
+            return []
+        catlinks_soup = BeautifulSoup(catlinks['catlinks'], "html.parser")
+        mw_normal_catlinks = catlinks_soup.find("div", {"class": "mw-normal-catlinks"})
+        if mw_normal_catlinks:
+            normal_catlinks = [a.attrs["title"] for a in mw_normal_catlinks.find_all("a") if a.attrs["title"].startswith("Category:")]
+
+    pattern = re.compile(r'^Category:')
+    if normal_catlinks:
+        return [pattern.sub("", catlink) for catlink in normal_catlinks]
+    return []
+
+
+def table_fix(input_text: str, cell_newline: str) -> str:
     return_text = input_text
     pattern = re.compile(r'\|[^\|\n]*\n+---\s*(?:(?:\n[^\|\n]*\|.*)*(?:(?:\n.+){1,10}\n{0,1}){0,1}(?:\n[^\|\n]*\|.*)+)+')
     tables_to_process = pattern.findall(input_text)
@@ -218,7 +216,7 @@ def table_fix(input_text: str, cell_newline: str):
     return return_text
 
 
-def format_conversion(html: str, output_format: str, config: dict):
+def format_conversion(html: str, output_format: str, config: dict) -> str:
     # 创建一个HTML2Text对象
     h = html2text.HTML2Text()
     # 根据格式忽略转换部分内容
@@ -233,9 +231,9 @@ def format_conversion(html: str, output_format: str, config: dict):
             # 忽略转换强调符号
             h.ignore_emphasis = True
             # 将div_element转换为Markdown格式
-            Markdown = h.handle(html)
+            markdown = h.handle(html)
             # 将Markdown格式转换为html格式
-            html = markdown(Markdown)
+            html = markdown2html(markdown)
             # 将html格式转换为文本格式
             text = ''.join(BeautifulSoup(html, features="lxml").findAll(string=True))
         case "markdown":
@@ -252,14 +250,19 @@ def format_conversion(html: str, output_format: str, config: dict):
             h.ignore_images = False
             # 将div_element转换为Markdown格式
             text = h.handle(html)
-    if output_format in ["markdown with links", "markdown"] and config["table_fix"]:
+        case "html":
+            text = html
+        case _:
+            msg = "Invalid output format"
+            raise ValueError(msg)
+    if output_format in ["markdown with links", "markdown"] and "table_fix" in config:
         text = table_fix(text, config["cell_newline"])
     return text
 
 
-def process_html(text: str, config: dict, output_format: str):
+def process_html(text: str, config: dict, output_format: str) -> str:
     # 使用Beautiful Soup解析HTML内容
-    soup = BeautifulSoup(text, 'html.parser')
+    soup = BeautifulSoup(text, "lxml")
     # 查找具有特定类名的<div>元素
     div_elements = soup.find_all('div', class_='mw-parser-output')
     max_div = None
@@ -271,7 +274,7 @@ def process_html(text: str, config: dict, output_format: str):
             max_div = div_element
             max_text_length = text_length
     div_element = max_div
-    # 如果找到了<div>元素，则查找并删除所有<table>与<div>元素
+    # 如果找到了<div>元素,则查找并删除所有<table>与<div>元素
     if div_element:
         elements_to_remove = []
         for i in ["navbox", "noprint"]:  # 去除导航模板
@@ -289,161 +292,83 @@ def process_html(text: str, config: dict, output_format: str):
     text = format_conversion(html, output_format, config)
 
     # 清理文本
-    text = clear_text(text, config["cleaning_rule"])
-    return text
+    clear_pattern = re.compile("|".join(config["cleaning_rule"]), flags=re.DOTALL)
+    return re.sub(clear_pattern, "", text, count=0)
 
 
-def main():
-    '''
-    主函数
-    '''
+def main(args: argparse.Namespace) -> int:
+    """
+    :param args: 参数
+    :return: 返回值
+    """
+    try:
+        config_path: str = args.config
+        output_path: str = args.output
+    except AttributeError:
+        logging.exception("缺少必要参数")
+        return 1
+    if not isinstance(config_path, str) and not isinstance(output_path, str):
+        logging.error("错误的参数类型")
+        return 1
+    config: dict = load_config(config_path)
 
-    def get_config():
-        '''
-        获取配置文件
-        '''
-        try:
-            with open(config_path, 'r', encoding='UTF-8') as file:
-                config = json.load(file)
+    page_titles = process_category(config)
+    page_titles = sorted(set(page_titles + config["page_titles"]))
 
-        except FileNotFoundError:
-            print(f"配置文件 '{config_path}' 未找到")
-            exit(1)
+    for page_title in page_titles:  # 移除排除的标题
+        if any(re.fullmatch(exclude_title, page_title) for exclude_title in config["exclude_titles"]):
+            page_titles.remove(page_title)
 
-        except json.JSONDecodeError:
-            print(f"配置文件 '{config_path}' 解析失败")
-            exit(1)
+    if os.path.exists(output_path):
+        with open(output_path, encoding="utf-8") as output_file:
+            try:
+                data: list[dict] = json.load(output_file)
+                original_titles = [item["title"] for item in data]
+            except Exception:
+                original_titles = []
+                data: list[dict] = []
+    else:
+        original_titles = []
+        data: list[dict] = []
 
-        except BaseException:
-            print(f"读取配置文件 '{config_path}' 时出现未知错误")
-            exit(1)
+    for i, page_title in enumerate(page_titles):
+        logging.info(f"[{i + 1}/{len(page_titles)}]正在处理页面：{page_title}")
 
-        for key in ["source", "site_url", "api", "cell_newline"]:
-            if key not in config:
-                print(f"配置文件 '{config_path}' 缺少 '{key}' 字段")
-                exit(1)
-            elif not isinstance(config[key], str):
-                print(f"配置文件 '{config_path}' 的 '{key}' 字段类型错误(应为字符串)")
-                exit(1)
+        page_dict = {"title": page_title, "source": config["source"]}
 
-        for key in ["output_format", "page_ids", "categories", "exclude_ids", "exclude_categories", "exclude_titles", "cleaning_rule"]:
-            if key not in config:
-                print(f"配置文件 '{config_path}' 缺少 '{key}' 字段")
-                exit(1)
-            elif not isinstance(config[key], list):
-                print(f"配置文件 '{config_path}' 的 '{key}' 字段类型错误(应为列表)")
-                exit(1)
+        if config["excludeExistingPages"] and page_title in original_titles:
+            continue
 
-        if "table_fix" not in config:
-            print(f"配置文件 '{config_path}' 缺少 'table_fix' 字段")
-            exit(1)
-        elif not isinstance(config["table_fix"], bool):
-            print(f"配置文件 '{config_path}' 的 'table_fix' 字段类型错误(应为布尔值)")
-            exit(1)
+        page_html = get_page_html(config["site_domain"], page_title)
+        if page_html == 404:
+            logging.warning(f"页面 {page_title} 不存在")
+            continue
 
-        for item in config["output_format"]:
-            if item.lower() not in ["plain", "markdown", "markdown with links"]:
-                print("output_format的值无效")
-                exit(1)
+        page_categories = get_categories(page_html)
+        if page_categories == []:
+            logging.warning(f"页面 {page_title} 没有获取到分类")
+        for page_category in page_categories:
+            if page_category in config["exclude_categories"]:
+                logging.info(f"页面 {page_title} 位于排除的分类 {page_category} 下，跳过")
+                continue
 
-        return config
+        page_dict.update(get_info(page_html, config["site_domain"], page_title))
 
-    def make_pageid_list(config):
-        '''
-        制作页面id列表
-        '''
+        page_dict["data"] = {}
+        for output_format in config["output_format"]:
+            page_dict["data"][output_format] = process_html(page_html, config, output_format)
 
-        def get_page_ids(api_url: str, category):
-            # 设置请求参数
-            params = {
-                'action': 'query',
-                'format': 'json',
-                'list': 'categorymembers',
-                'cmtitle': f'Category:{category}',
-                'cmlimit': 500
-            }
+        data.append(page_dict)
+        with open(output_path, 'w', encoding="utf-8") as output_file:
+            json.dump(data, output_file, ensure_ascii=False, indent=4)
 
-            page_ids = []
-
-            # 循环请求，直到获取全部页面
-            while True:
-                while True:
-                    try:
-                        # 发送get请求，获取响应
-                        response = requests.get(api_url, params=params, timeout=100)
-                        # 检查响应状态码是否正确
-                        response.raise_for_status()
-                        # 解析响应内容
-                        data = response.json()
-
-                    except requests.exceptions.RequestException as e:
-                        # 打印错误信息
-                        request_error(f"请求错误:{e}")
-                    else:
-                        break
-
-                # 遍历查询结果
-                for item in data['query']['categorymembers']:
-                    # 将查询结果添加到page_ids列表中
-                    page_ids.append(item['pageid'])
-
-                # 如果查询结果中有continue字段，则获取continue字段的值
-                if 'continue' in data:
-                    # 获取continue字段的值
-                    params['cmcontinue'] = data['continue']['cmcontinue']
-                else:
-                    # 否则，跳出循环
-                    break
-
-            # 返回page_ids列表
-            return page_ids
-
-        if config["categories"]:
-            for category in config["categories"]:
-                print(f"正在获取分类{category}中的所有页面id")
-                # 获取指定Category的页面id
-                # 调用get_page_ids函数，获取指定Category的页面id
-                page_ids = get_page_ids(config["api"], category)
-                # 将获取到的页面id添加到config["page_ids"]中
-                config["page_ids"].extend(page_ids)
-                time.sleep(1)  # 设置睡眠时间，防止被wikimedia服务器封禁IP
-        else:
-            print('未设置要获取的Category，跳过获取config["categories"]中的页面id')
-        if config["exclude_categories"]:
-            for exclude_category in config["exclude_categories"]:
-                print(f"正在获取分类{exclude_category}中的所有页面id")
-                # 调用get_page_ids函数，获取exclude_category中的页面id
-                page_ids = get_page_ids(config["api"], exclude_category)
-                # 将获取的页面id添加到config["exclude_ids"]中
-                config["exclude_ids"].extend(page_ids)
-                time.sleep(1)  # 设置睡眠时间，防止被wikimedia服务器封禁IP
-        else:
-            # 如果config["exclude_categories"]中没有元素，则输出提示信息
-            print('未设置要排除的Category，跳过获取config["exclude_categories"]中的页面id')
-        if config["exclude_ids"]:
-            # 如果config["exclude_ids"]存在，则删除config["page_ids"]中存在于config["exclude_ids"]的元素
-            config["page_ids"] = [x for x in config["page_ids"] if x not in config["exclude_ids"]]
-        if not config["page_ids"]:
-            # 如果config["page_ids"]为空，则打印提示信息并退出程序
-            print("没有需要处理的页面id，程序结束")
-            exit(1)
-        # 将config["page_ids"]中的元素排序，并去重
-        config["page_ids"] = sorted(list(set(config["page_ids"])))
-        return config["page_ids"]
-
-    current_time = datetime.datetime.now()
-    print("mediawikiextractor\n运行开始于：", current_time)
-    config = get_config()  # 获取配置
-    config["page_ids"] = make_pageid_list(config)  # 制作页面id列表
-    get_page(config)  # 获取页面
+    return 0
 
 
-error_count = 0
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s]%(message)s")
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('--config', required=True, help='Path to config file')
     parser.add_argument('--output', required=True, help='Path to output file')
     args = parser.parse_args()
-    config_path = args.config
-    output_path = args.output
-    main()
+    sys.exit(main(args))

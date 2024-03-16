@@ -39,18 +39,17 @@ python mediawikiextractor.py --config config.json --output data.json
 {
         "name": "萌娘百科",
         "source": "moegril",
-        "site_url": "https://zh.moegirl.org.cn/index.php",
-        "api": "https://zh.moegirl.org/api.php",
+        "site_domain": "zh.moegirl.org.cn",
+        "excludeExistingPages": true,
         "table_fix": true,
         "cell_newline": "<br>",
         "output_format": ["plain","markdown"],
-        "page_ids": [19765,275042,104819,205103,215911,291578,414748,546166,322316,343884,286448,385770,33291,8639,556824,297456,20490,31450,33234,35578,153449,33227,255209,574022,374048,28845,308168],
-        "categories": ["恋爱冒险游戏", "视觉小说","Galgame公司","宅文化术语","萌宅用语","Little_Busters!","AIR","Angel_Beats","CLANNAD","Charlotte","Harmonia(Key)#","Kanon","LOOPERS","MOON.","LUNARiA_-Virtualized_Moonchild-","ONE～辉之季节～","Rewrite","Summer_Pockets","星之梦","星之终途","ATRI","爱上火车","初音岛","9-nine-","常轨脱离Creative","住在拔作岛上的贫乳应该如何是好？","苍之彼方的四重奏","美少女万华镜","缘之空","灰色系列","少女领域","千恋万花","FORTUNE ARTERIAL","柚子社作品","Palette作品","Smile作品","Recette作品","BUG SYSTEM作品","SWEET&TEA作品","猫猫社作品","YAMAYURI GAMES作品","Navel作品","Navel honeybell作品","AUGUST作品","Whirlpool作品","戏画作品"],
-        "exclude_ids": [561570,280950,28533],
+        "page_titles": ["Galgame", "视觉小说", "汉化组", "音译假名", "塞氏翻译法", "翻译腔", "机翻", "本地化", "成语", "本土化译名", "彩蛋", "成就", "Dead End", "ACG", "Dream End", "分割商法", "攻略", "Good End", "True End", "Normal End", "Open End", "Bad End", "好感度", "剧情杀", "游戏CG", "拔作", "Fan Disc"],
+        "categories": ["恋爱冒险游戏", "视觉小说","Galgame公司","宅文化术语","萌宅用语","Little_Busters!","AIR","Angel_Beats","CLANNAD","Charlotte","Harmonia(Key)#","Kanon","LOOPERS","MOON.","LUNARiA_-Virtualized_Moonchild-","ONE～辉之季节～","Rewrite","Summer_Pockets","星之梦","星之终途","ATRI","爱上火车","初音岛","9-nine-","常轨脱离Creative","住在拔作岛上的贫乳应该如何是好？","苍之彼方的四重奏","美少女万华镜","缘之空","灰色系列","少女领域","千恋万花","FORTUNE ARTERIAL","柚子社作品","Palette作品","Smile作品","Recette作品","BUG SYSTEM作品","SWEET&TEA作品","YAMAYURI GAMES作品","Navel作品","Navel honeybell作品","AUGUST作品","Whirlpool作品","戏画作品"],
         "exclude_categories": ["网页游戏"],
-        "exclude_titles": ["Category:.*","Template:.*","User:.*"],
-        "cleaning_rule": [".*萌娘百科祝您在本站度过愉快的时光。(?: |\n)*(?!.*萌娘百科祝您在本站度过愉快的时光)",".*祝您在萌娘百科度过愉快的时光。(?: |\n)*(?!.* 祝您在萌娘百科度过愉快的时光)",".*本条目经赤座茜审阅，可以给全世界的妹控观赏，阅读前请大声欢呼三声有个能干的妹妹真好！(?: |\n)*(?!.*本条目经赤座茜审阅，可以给全世界的妹控观赏，阅读前请大声欢呼三声有个能干的妹妹真好！)",".*穹妹的凝望本条目经过穹妹的认可，可以给全世界的妹控观赏。 观看本文前请大声欢呼三声有个能干的妹妹真好，否则属于思想犯罪，下场可能是：  被推到叉依姬神社的湖里淹死或者转学； 与春日野悠搞姬，从此过上性福快乐的生活 被自己的妹妹抛弃(?: |\n)*(?!.*穹妹的凝望本条目经过穹妹的认可，可以给全世界的妹控观赏。 观看本文前请大声欢呼三声有个能干的妹妹真好，否则属于思想犯罪，下场可能是：  被推到叉依姬神社的湖里淹死或者转学； 与春日野悠搞姬，从此过上性福快乐的生活 被自己的妹妹抛弃)",".*编辑前请阅读  Wiki入门  或  萌娘百科:编辑规范  ，并查找相关资料哦。(?: |\n)*(?!.*编辑前请阅读  Wiki入门  或  萌娘百科:编辑规范  ，并查找相关资料哦。)",".*今天（[1-9]{1,2}月[1-9]{1,2}日）是这位萌娘的生日，让我们一起祝她生日快乐！(?: |\n)*(?!.*今天（[1-9]{1,2}月[1-9]{1,2}日）是这位萌娘的生日，让我们一起祝她生日快乐！)","(?:\\n)+#* *外部链接(?:[与及和]注释)*(?:\\n)+.*","(?:\\n)+#* *注释(?:[与及和]*外部链接)* *(?:\\n)+.*",".*具体使用方法详见  模板说明文档 *。* *(?:\\n)*"]
-}
+        "exclude_titles": ["Category:.*","Template:.*","User:.*", "牧羊人之心", "V.G.NEO"],
+        "cleaning_rule": [".*萌娘百科祝您在本站度过愉快的时光。(?: |\n)*(?!.*萌娘百科祝您在本站度过愉快的时光)",".*祝您在萌娘百科度过愉快的时光。(?: |\n)*(?!.* 祝您在萌娘百科度过愉快的时光)",".*本条目经赤座茜审阅，可以给全世界的妹控观赏，阅读前请大声欢呼三声有个能干的妹妹真好！(?: |\n)*(?!.*本条目经赤座茜审阅，可以给全世界的妹控观赏，阅读前请大声欢呼三声有个能干的妹妹真好！)",".*穹妹的凝望本条目经过穹妹的认可，可以给全世界的妹控观赏。 观看本文前请大声欢呼三声有个能干的妹妹真好，否则属于思想犯罪，下场可能是：  被推到叉依姬神社的湖里淹死或者转学； 与春日野悠搞姬，从此过上性福快乐的生活 被自己的妹妹抛弃(?: |\n)*(?!.*穹妹的凝望本条目经过穹妹的认可，可以给全世界的妹控观赏。 观看本文前请大声欢呼三声有个能干的妹妹真好，否则属于思想犯罪，下场可能是：  被推到叉依姬神社的湖里淹死或者转学； 与春日野悠搞姬，从此过上性福快乐的生活 被自己的妹妹抛弃)",".*编辑前请阅读  Wiki入门  或  萌娘百科:编辑规范  ，并查找相关资料哦。(?: |\n)*(?!.*编辑前请阅读  Wiki入门  或  萌娘百科:编辑规范  ，并查找相关资料哦。)",".*今天（[1-9]{1,2}月[1-9]{1,2}日）是这位萌娘的生日，让我们一起祝她生日快乐！(?: |\n)*(?!.*今天（[1-9]{1,2}月[1-9]{1,2}日）是这位萌娘的生日，让我们一起祝她生日快乐！)","(?:\\n)+#* *外部链接(?:[与及和]注释)*(?:\\n)+.*","(?:\\n)+#* *注释(?:[与及和]*外部链接)* *(?:\\n)+.*"]
+    }
 ```
 
 更多例子见[VisualNovel-Dataset](https://github.com/chenmozhijin/VisualNovel-Dataset/tree/main/.github/workflows/config)
@@ -61,14 +60,14 @@ python mediawikiextractor.py --config config.json --output data.json
 |---------------------------------|---------------------------------------------------
 | `name`                          | 网站名称，脚本不会读取。
 | `source`                        | 数据来源，输出文件中的每个页面字典中都将包含此元素。
-| `site_url`                      | 网站的index.php地址，如：`https://ja.wikipedia.org/w/index.php`。用于获取获取页面内容。
-| `api`                           | 网站的api地址，如：`https://ja.wikipedia.org/w/api.php`。用于获取获取页面基本信息。
+| `site_domain`                   | 网站的域名
+| `excludeExistingPages`          | 是否排除已存在的页面，布尔值。
 | `table_fix`                     | 是否修复html2text无法正常转换的表格，布尔值。
 | `cell_newline`                  | 修复表格时单元格内换行使用的分隔符，字符串。
 | `output_format`                 | 输出文本格式的列表，目前支持：`plain`(纯文本)、`markdown`(不包含任何链接)、`markdown with links`(包含链接包括图片链接)。
-| `page_ids`                      | 需要爬取的页面id列表。
+| `page_titles`                   | 需要爬取的页面标题列表。
 | `categories`                    | 需要爬取的分类列表。
-| `exclude_ids`                   | 需要排除的页面id列表。
+| `exclude_titles`                | 需要排除的页面标题列表。
 | `exclude_categories`            | 需要排除的分类列表。
 | `exclude_titles`                | 需要排除的页面标题列表，可以为正表达式。
 | `cleaning_rule`                 | 清理规则，为列表其中每个元素为正表达式，匹配到的内容将会在文本中删除。
@@ -89,23 +88,21 @@ python mediawikiextractor.py --config config.json --output data.json
 [
     {
         "title": "能美库特莉亚芙卡",
-        "pageid": 13078,
-        "version": 6735922,
-        "timestamp": "2023-03-14T11:39:15Z",
         "source": "moegril",
-        "text": {
+        "pageid": 13078,
+        "revision_id": 6735922,
+        "data": {
             "plain": "纯文本格式的页面数据",
             "markdown": "markdown格式的页面数据"
         }
     },
     {
         "title": "Kud Wafter",
-        "pageid": 39569,
-        "version": 7073610,
-        "timestamp": "2023-09-27T09:44:07Z",
         "source": "moegril",
+        "pageid": 39569,
+        "revision_id": 7073610,
         "text": {
-            "plain": "纯文本格式的页面数据",
+            "data": "纯文本格式的页面数据",
              "markdown": "markdown格式的页面数据",
         }
     }
