@@ -81,7 +81,9 @@ def process_category(config: dict) -> list[str]:
     index_url = config["index_url"]
     parsed_url = urlparse(index_url)
     site_domain = parsed_url.netloc
-    for i, category in enumerate(categories):
+    i = 0
+    while i < len(categories):
+        category = categories[i]
         nextpage_url = None
         while True:
             if nextpage_url is None:
@@ -94,12 +96,15 @@ def process_category(config: dict) -> list[str]:
                 break
             soup = BeautifulSoup(page_html, "lxml")
             nextpage_url = None
-            mw_category = soup.find("div", "mw-category")
-            if mw_category:
+            mw_categories = soup.find_all("div", "mw-category")
+            for mw_category in mw_categories:
                 for li in mw_category.find_all("li"):
                     a = li.find("a")
                     if a and "title" in a.attrs:
-                        page_titles.append(a.attrs["title"])
+                        if a.attrs["title"].startswith("Category:"):
+                            categories.append(a.attrs["title"].replace("Category:", ""))
+                        else:
+                            page_titles.append(a.attrs["title"])
             for a in soup.find_all("a"):
                 if (a.attrs.get("title") == f"Category:{category}"
                         and "pagefrom" in a.attrs.get("href", "")):
@@ -110,6 +115,7 @@ def process_category(config: dict) -> list[str]:
                 break
         if success:
             logging.info(f"[{i + 1}/{len(categories)}]获取 {category} 分类的页面列表成功")
+        i += 1
 
     return page_titles
 
@@ -151,10 +157,12 @@ def get_info(html: str, index_url: str, title: str) -> dict:
 
 
 def get_categories(html: str) -> list:
+    normal_catlinks = []
     soup = BeautifulSoup(html, "html.parser")
-    mw_normal_catlinks = soup.find("div", {"class": "mw-normal-catlinks"})
-    if mw_normal_catlinks:
-        normal_catlinks = [a.attrs["title"] for a in mw_normal_catlinks.find_all("a")]
+    mw_normal_catlinkss = soup.find_all("div", {"id": "mw-normal-catlinks", "class": "mw-normal-catlinks"})
+    if mw_normal_catlinkss:
+        for mw_normal_catlinks in mw_normal_catlinkss:
+            normal_catlinks.extend([a.attrs["title"] for a in mw_normal_catlinks.find_all("a") if "title" in a.attrs and a.attrs["title"].startswith("Category:")])
     else:
         scripts = soup.find_all("script")
         catlinks = None
@@ -172,7 +180,7 @@ def get_categories(html: str) -> list:
         catlinks_soup = BeautifulSoup(catlinks['catlinks'], "html.parser")
         mw_normal_catlinks = catlinks_soup.find("div", {"class": "mw-normal-catlinks"})
         if mw_normal_catlinks:
-            normal_catlinks = [a.attrs["title"] for a in mw_normal_catlinks.find_all("a") if a.attrs["title"].startswith("Category:")]
+            normal_catlinks = [a.attrs["title"] for a in mw_normal_catlinks.find_all("a") if "title" in a.attrs and a.attrs["title"].startswith("Category:")]
 
     pattern = re.compile(r'^Category:')
     if normal_catlinks:
@@ -312,8 +320,9 @@ def main(args: argparse.Namespace) -> int:
     page_titles = process_category(config)
     page_titles = sorted(set(page_titles + config["page_titles"]))
 
+    exclude_title_pattern = re.compile("|".join(config["exclude_titles"]))
     for page_title in page_titles:  # 移除排除的标题
-        if any(re.fullmatch(exclude_title, page_title) for exclude_title in config["exclude_titles"]):
+        if re.fullmatch(exclude_title_pattern, page_title):
             page_titles.remove(page_title)
 
     if os.path.exists(output_path):
