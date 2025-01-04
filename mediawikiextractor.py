@@ -18,7 +18,7 @@ import html2text
 from markdown import markdown as markdown2html
 from fake_useragent import UserAgent
 
-ua = UserAgent(browsers=["chrome", "firefox", "safari", "opera"], os=["Windows", "Mac OS X"], device_type=["desktop"], min_version=87)
+ua = UserAgent(browsers=["Chrome", "Firefox", "Edge", "Opera", "Safari"], os=["Windows", "Mac OS X"], min_version=87)
 last_request_time = 0.0
 
 
