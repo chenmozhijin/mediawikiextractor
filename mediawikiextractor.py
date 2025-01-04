@@ -38,7 +38,7 @@ def load_config(config_path: str) -> dict:
     if not isinstance(config, dict):
         logging.exception("配置文件格式错误")
 
-    for content_type, keys in {str: ["source", "index_url"],
+    for content_type, keys in {str: ["source"],
                                bool: ["table_fix", "excludeExistingPages"],
                                list: ["output_format", "page_titles", "categories", "exclude_categories", "exclude_titles", "cleaning_rule"]}.items():
         for key in keys:
@@ -47,6 +47,13 @@ def load_config(config_path: str) -> dict:
 
     if config["table_fix"] is True and ("cell_newline" not in config or not isinstance(config["cell_newline"], str)):
         logging.error("配置文件错误，table_fix启用时cell_newline必须为字符串")
+
+    if "index_url" not in config:
+        logging.error("配置文件错误，index_url缺失或类型错误")
+    elif isinstance(config["index_url"], str):
+        config["index_url"] = [config["index_url"]]
+    elif not isinstance(config["index_url"], list):
+        logging.error("配置文件错误，index_url缺失或类型错误")
     return config
 
 
@@ -85,13 +92,12 @@ def process_category(config: dict) -> list[str]:
     """
     page_titles: list[str] = []
     categories: list[str] = sorted(set(config["categories"]))
-    index_url = config["index_url"]
-    parsed_url = urlparse(index_url)
-    site_domain = parsed_url.netloc
     i = 0
     while i < len(categories):
         category = categories[i]
         nextpage_url = None
+        index_url = random.choice(config["index_url"])
+        site_domain = urlparse(index_url).netloc
         while True:
             if nextpage_url is None:
                 page_html = request_page(index_url, {"title": f"Category:{category}"})
@@ -351,6 +357,7 @@ def main(args: argparse.Namespace) -> int:
     start_process_page_time = time.time()
 
     def process_page(page_title: str) -> None:
+        index_url = random.choice(config["index_url"])
         logging.info(f"[{i + 1}/{len(page_titles)}]正在处理页面：{page_title}  ({(time.time() - start_process_page_time) / 60:.2f}s/page)")
 
         page_dict = {"title": page_title, "source": config["source"]}
@@ -359,7 +366,7 @@ def main(args: argparse.Namespace) -> int:
         if config["excludeExistingPages"] and same_title_item:
             return
 
-        page_html = request_page(config["index_url"], {"title": page_title})
+        page_html = request_page(index_url, {"title": page_title})
         if page_html == 404:
             logging.warning(f"页面 {page_title} 不存在")
             return
@@ -372,7 +379,7 @@ def main(args: argparse.Namespace) -> int:
                 logging.info(f"页面 {page_title} 位于排除的分类 {page_category} 下，跳过")
                 continue
 
-        page_dict.update(get_info(page_html, config["index_url"], page_title))
+        page_dict.update(get_info(page_html, index_url, page_title))
 
         page_dict["data"] = {}
         for output_format in config["output_format"]:
