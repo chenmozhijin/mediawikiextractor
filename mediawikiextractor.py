@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: Copyright (C) 2024 沉默の金 <cmzj@cmzj.org>
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import argparse
@@ -8,10 +10,10 @@ import sys
 import time
 from urllib.parse import urlparse
 
-import html2text
 import regex as re
 import requests
 from bs4 import BeautifulSoup
+from html2text import html2text
 from markdown import markdown as markdown2html
 
 headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -77,7 +79,7 @@ def process_category(config: dict) -> list[str]:
     :return: 处理后的页面url列表
     """
     page_titles: list[str] = []
-    categories: list[str] = config["categories"]
+    categories: list[str] = sorted(set(config["categories"]))
     index_url = config["index_url"]
     parsed_url = urlparse(index_url)
     site_domain = parsed_url.netloc
@@ -102,7 +104,8 @@ def process_category(config: dict) -> list[str]:
                     a = li.find("a")
                     if a and "title" in a.attrs:
                         if a.attrs["title"].startswith("Category:"):
-                            categories.append(a.attrs["title"].replace("Category:", ""))
+                            if a.attrs["title"].replace("Category:", "") not in categories:
+                                categories.append(a.attrs["title"].replace("Category:", ""))
                         else:
                             page_titles.append(a.attrs["title"])
             for a in soup.find_all("a"):
@@ -127,7 +130,7 @@ def get_info(html: str, index_url: str, title: str) -> dict:
     if find_results:
         info = {"pageid": int(find_results[0][0]), "revision_id": int(find_results[0][1])}
 
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(html, "lxml")
     if info == {"pageid": None, "revision_id": None}:
         scripts = soup.find_all("script")
         for script in scripts:
@@ -140,7 +143,7 @@ def get_info(html: str, index_url: str, title: str) -> dict:
 
     if info == {"pageid": None, "revision_id": None}:
         index_html = request_page(index_url, {"title": title, "action": 'info'})
-        soup = BeautifulSoup(index_html, "html.parser")
+        soup = BeautifulSoup(index_html, "lxml")
         mw_pageinfo_article_id = soup.find('tr', {'id': 'mw-pageinfo-article-id'})
         if mw_pageinfo_article_id:
             for td in mw_pageinfo_article_id.find_all('td'):
@@ -158,7 +161,7 @@ def get_info(html: str, index_url: str, title: str) -> dict:
 
 def get_categories(html: str) -> list:
     normal_catlinks = []
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(html, "lxml")
     mw_normal_catlinkss = soup.find_all("div", {"id": "mw-normal-catlinks", "class": "mw-normal-catlinks"})
     if mw_normal_catlinkss:
         for mw_normal_catlinks in mw_normal_catlinkss:
@@ -177,7 +180,7 @@ def get_categories(html: str) -> list:
                     break
         if not catlinks:
             return []
-        catlinks_soup = BeautifulSoup(catlinks['catlinks'], "html.parser")
+        catlinks_soup = BeautifulSoup(catlinks['catlinks'], "lxml")
         mw_normal_catlinks = catlinks_soup.find("div", {"class": "mw-normal-catlinks"})
         if mw_normal_catlinks:
             normal_catlinks = [a.attrs["title"] for a in mw_normal_catlinks.find_all("a") if "title" in a.attrs and a.attrs["title"].startswith("Category:")]
@@ -190,7 +193,7 @@ def get_categories(html: str) -> list:
 
 def table_fix(input_text: str, cell_newline: str) -> str:
     return_text = input_text
-    pattern = re.compile(r'\|[^\|\n]*\n+---\s*(?:(?:\n[^\|\n]*\|.*)*(?:(?:\n.+){1,10}\n{0,1}){0,1}(?:\n[^\|\n]*\|.*)+)+')
+    pattern = re.compile(r'\|?[^\|\n]*\n+---\s*(?:(?:\n[^\|\n]*\|.*)*(?:(?:\n.+){1,10}\n{0,1}){0,1}(?:\n[^\|\n]*\|.*)+)+')
     tables_to_process = pattern.findall(input_text)
     for table_to_process in tables_to_process:
         original_table = table_to_process
@@ -219,6 +222,11 @@ def table_fix(input_text: str, cell_newline: str) -> str:
         result_table = '\n'.join(table_header + table_content)
         return_text = return_text.replace(original_table, result_table)
     return return_text
+
+
+def fix_md037(md: str) -> str:
+    pattern = re.compile(r'([\~\*\_]{1,2})[ \t\f\v]*(.*?)[ \t\f\v]*?\1')
+    return re.sub(pattern, r'\1\2\1', md)
 
 
 def format_conversion(html: str, output_format: str, config: dict) -> str:
@@ -306,6 +314,7 @@ def main(args: argparse.Namespace) -> int:
     :param args: 参数
     :return: 返回值
     """
+    start_run_time = time.time()
     try:
         config_path: str = args.config
         output_path: str = args.output
@@ -322,7 +331,7 @@ def main(args: argparse.Namespace) -> int:
 
     exclude_title_pattern = re.compile("|".join(config["exclude_titles"]))
     for page_title in page_titles:  # 移除排除的标题
-        if re.fullmatch(exclude_title_pattern, page_title):
+        if re.fullmatch(exclude_title_pattern, page_title) or page_title.endswith("/style.css"):
             page_titles.remove(page_title)
 
     if os.path.exists(output_path):
@@ -334,19 +343,21 @@ def main(args: argparse.Namespace) -> int:
     else:
         data: list[dict] = []
 
-    for i, page_title in enumerate(page_titles):
-        logging.info(f"[{i + 1}/{len(page_titles)}]正在处理页面：{page_title}")
+    start_process_page_time = time.time()
+
+    def process_page(page_title: str) -> None:
+        logging.info(f"[{i + 1}/{len(page_titles)}]正在处理页面：{page_title}  ({(time.time() - start_process_page_time) / 60:.2f}s/page)")
 
         page_dict = {"title": page_title, "source": config["source"]}
 
         same_title_item = [item for item in data if item["title"] == page_title and item["source"] == config["source"]]
         if config["excludeExistingPages"] and same_title_item:
-            continue
+            return
 
         page_html = request_page(config["index_url"], {"title": page_title})
         if page_html == 404:
             logging.warning(f"页面 {page_title} 不存在")
-            continue
+            return
 
         page_categories = get_categories(page_html)
         if page_categories == []:
@@ -368,6 +379,14 @@ def main(args: argparse.Namespace) -> int:
         with open(output_path, 'w', encoding="utf-8") as output_file:
             json.dump(data, output_file, ensure_ascii=False, indent=4)
 
+    for i, page_title in enumerate(page_titles):
+        try:
+            process_page(page_title)
+        except Exception:
+            logging.exception(f"处理页面 {page_title} 时发生错误")
+            continue
+
+    logging.info(f"所有页面处理完毕,耗时: {time.time() - start_run_time}秒({(time.time() - start_process_page_time) / 60:.2f}s/page)")
     return 0
 
 
