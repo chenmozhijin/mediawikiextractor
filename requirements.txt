@@ -1,6 +1,6 @@
-regex
 requests
 html2text
 markdown
 bs4
 lxml
+fake-useragent
