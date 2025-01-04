@@ -9,16 +9,18 @@ import os
 import sys
 import time
 from urllib.parse import urlparse
+import random
+import re
 
-import regex as re
 import requests
 from bs4 import BeautifulSoup
-from html2text import html2text
+import html2text
 from markdown import markdown as markdown2html
 
 headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 "
            "Safari/537.36 Edg/120.0.0.0"}
+last_request_time = 0.0
 
 
 def load_config(config_path: str) -> dict:
@@ -50,14 +52,18 @@ def load_config(config_path: str) -> dict:
 
 
 def request_page(url: str, params: dict | None = None) -> str | int:
+    global last_request_time
     if params is None:
         params = {}
     while True:
         try:
+            if time.time() - last_request_time < random.uniform(1, 2):
+                time.sleep(random.uniform(0.7, 2.5))
             response = requests.get(url, params=params, headers=headers, timeout=10)
+            last_request_time = time.time()
             if response.status_code == 429:
                 logging.warning("请求过于频繁，等待10秒后重试")
-                time.sleep(10)
+                time.sleep(random.randrange(10, 15))
                 continue
             if response.status_code == 404:
                 return 404
