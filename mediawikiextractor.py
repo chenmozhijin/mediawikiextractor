@@ -16,10 +16,9 @@ import requests
 from bs4 import BeautifulSoup
 import html2text
 from markdown import markdown as markdown2html
+from fake_useragent import UserAgent
 
-headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-           "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 "
-           "Safari/537.36 Edg/120.0.0.0"}
+ua = UserAgent(browsers=["chrome", "firefox", "safari", "opera"], os=["Windows", "Mac OS X"], device_type=["desktop"], min_version=87)
 last_request_time = 0.0
 
 
@@ -59,7 +58,7 @@ def request_page(url: str, params: dict | None = None) -> str | int:
         try:
             if time.time() - last_request_time < random.uniform(1, 2):
                 time.sleep(random.uniform(0.7, 2.5))
-            response = requests.get(url, params=params, headers=headers, timeout=10)
+            response = requests.get(url, params=params, headers={"User-Agent": ua.random}, timeout=10)
             last_request_time = time.time()
             if response.status_code == 429:
                 logging.warning("请求过于频繁，等待10秒后重试")
